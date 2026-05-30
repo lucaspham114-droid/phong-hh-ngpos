@@ -1,0 +1,6 @@
+{
+  "name": "Phong Hưng POS",
+  "description": "Hệ thống quản lý bán hàng, nhập hàng, kho và công nợ rút gọn cho hộ kinh doanh gia dụng",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

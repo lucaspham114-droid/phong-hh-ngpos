@@ -1,0 +1,272 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Space+Grotesk:wght@400..700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+}
+
+:root {
+  --bg-page: #f8fafc;
+  --bg-card: #ffffff;
+  --border-card: #f1f5f9;
+  --border-input: #e2e8f0;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --bg-muted: #f1f5f9;
+  --bg-hover: #f8fafc;
+}
+
+/* Ambient Indigo/Dark palette under .dark class */
+.dark {
+  --bg-page: #0b0f19; /* beautiful cosmic dark */
+  --bg-card: #151d30; /* midnight card */
+  --border-card: #202b43; /* card border */
+  --border-input: #2e3d5e; /* input border */
+  --text-main: #f1f5f9; /* high contrast white-slate text */
+  --text-muted: #94a3b8; /* muted text slate-400 */
+  --bg-muted: #0f172a; /* slate-950 backdrop */
+  --bg-hover: #1e293b; /* state hover slate-800 */
+}
+
+/* Smooth globally animated theme transitions */
+html, body, #root {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Force standard light surface segments to adjust dynamically */
+.dark body {
+  background-color: var(--bg-page) !important;
+  color: var(--text-main) !important;
+}
+
+.dark .min-h-screen {
+  background-color: var(--bg-page) !important;
+}
+
+.dark .bg-slate-50, 
+.dark .bg-slate-50/50, 
+.dark .bg-\[\#F8FAFC\] {
+  background-color: var(--bg-page) !important;
+}
+
+.dark .bg-white {
+  background-color: var(--bg-card) !important;
+}
+
+.dark .border-slate-100 {
+  border-color: var(--border-card) !important;
+}
+
+.dark .border-slate-200, .dark .border-slate-150 {
+  border-color: var(--border-input) !important;
+}
+
+.dark .bg-slate-100 {
+  background-color: var(--bg-muted) !important;
+}
+
+.dark .bg-slate-50 {
+  background-color: var(--bg-muted) !important;
+}
+
+/* Hover states */
+.dark .hover\:bg-slate-50:hover {
+  background-color: var(--bg-hover) !important;
+}
+
+/* Force standard text slates to align */
+.dark .text-slate-900, 
+.dark .text-slate-800, 
+.dark .text-slate-700, 
+.dark .text-slate-600 {
+  color: var(--text-main) !important;
+}
+
+.dark .text-slate-500, 
+.dark .text-slate-450, 
+.dark .text-slate-400 {
+  color: var(--text-muted) !important;
+}
+
+/* Form fields elements modern defaults */
+.dark input[type="text"], 
+.dark input[type="number"], 
+.dark input[type="password"], 
+.dark input[type="search"], 
+.dark textarea, 
+.dark select {
+  background-color: var(--bg-muted) !important;
+  color: var(--text-main) !important;
+  border-color: var(--border-input) !important;
+}
+
+.dark input:focus, 
+.dark textarea:focus, 
+.dark select:focus {
+  border-color: #f43f5e !important;
+}
+
+/* Tables details */
+.dark table {
+  background-color: var(--bg-card) !important;
+}
+
+.dark th {
+  background-color: var(--bg-muted) !important;
+  color: var(--text-main) !important;
+  border-color: var(--border-card) !important;
+}
+
+.dark td {
+  border-color: var(--border-card) !important;
+}
+
+.dark tr:hover td {
+  background-color: var(--bg-hover) !important;
+}
+
+/* Segment lists selectors tabs */
+.dark .bg-slate-100 p-1, 
+.dark .flex.bg-slate-100 {
+  background-color: var(--bg-muted) !important;
+}
+
+.dark button.bg-white {
+  background-color: var(--bg-card) !important;
+  color: #f1f5f9 !important;
+}
+
+/* Modals overlays backgrounds */
+.dark .bg-slate-900\/50, 
+.dark .bg-slate-900\/40, 
+.dark .bg-slate-900\/60,
+.dark .bg-black\/50 {
+  background-color: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(4px);
+}
+
+.dark .shadow-xl, .dark .shadow-lg {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -2px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Light background indicators overlays to maintain visual balance */
+.dark .bg-rose-50 {
+  background-color: rgba(225, 29, 72, 0.15) !important;
+  color: #fda4af !important;
+}
+
+.dark .bg-indigo-50 {
+  background-color: rgba(79, 70, 229, 0.15) !important;
+  color: #c7d2fe !important;
+}
+
+.dark .bg-emerald-50 {
+  background-color: rgba(5, 150, 105, 0.15) !important;
+  color: #a7f3d0 !important;
+}
+
+.dark .bg-amber-50 {
+  background-color: rgba(245, 158, 11, 0.15) !important;
+  color: #fde68a !important;
+}
+
+.dark .text-[#E11D48] {
+  color: #fb7185 !important;
+}
+
+.dark .text-indigo-600 {
+  color: #818cf8 !important;
+}
+
+.dark .text-emerald-650 {
+  color: #34d399 !important;
+}
+
+.dark .text-rose-600 {
+  color: #f43f5e !important;
+}
+
+.dark .hover:bg-rose-50/60:hover {
+  background-color: rgba(225, 29, 72, 0.1) !important;
+}
+
+.dark .bg-rose-50/60 {
+  background-color: rgba(225, 29, 72, 0.15) !important;
+}
+
+.dark .border-rose-100 {
+  border-color: rgba(225, 29, 72, 0.3) !important;
+}
+
+.dark .border-indigo-150 {
+  border-color: rgba(79, 70, 229, 0.3) !important;
+}
+
+/* Dynamic Brand coordination variables */
+:root {
+  --theme-primary: #e11d48; /* default brand color */
+  --theme-primary-hover: #be123c;
+  --theme-primary-light: rgba(225, 29, 72, 0.08);
+}
+
+/* Custom class overrides mapping to variables */
+.bg-theme-primary {
+  background-color: var(--theme-primary) !important;
+}
+.hover\:bg-theme-primary-hover:hover {
+  background-color: var(--theme-primary-hover) !important;
+}
+.text-theme-primary {
+  color: var(--theme-primary) !important;
+}
+.border-theme-primary {
+  border-color: var(--theme-primary) !important;
+}
+.bg-theme-light {
+  background-color: var(--theme-primary-light) !important;
+}
+.text-theme-accent {
+  color: var(--theme-primary) !important;
+}
+.focus\:ring-theme:focus {
+  --tw-ring-color: var(--theme-primary) !important;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+/* Dynamically override standard hardcoded #E11D48 (and #BE123C) elements under dynamic theme coordination */
+.bg-\[\#E11D48\], [class*="bg-[#E11D48]"] {
+  background-color: var(--theme-primary) !important;
+}
+.hover\:bg-\[\#BE123C\]:hover, [class*="hover:bg-[#BE123C]"]:hover {
+  background-color: var(--theme-primary-hover) !important;
+}
+.text-\[\#E11D48\], [class*="text-[#E11D48]"] {
+  color: var(--theme-primary) !important;
+}
+.border-\[\#E11D48\], [class*="border-[#E11D48]"] {
+  border-color: var(--theme-primary) !important;
+}
+.focus\:border-\[\#E11D48\]:focus, [class*="focus:border-[#E11D48]"]:focus {
+  border-color: var(--theme-primary) !important;
+}
+.focus\:ring-\[\#E11D48\]:focus, [class*="focus:ring-[#E11D48]"]:focus {
+  --tw-ring-color: var(--theme-primary) !important;
+}
+
+/* Scrollbar styles override */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: var(--bg-page);
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--border-input);
+  border-radius: 4px;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
