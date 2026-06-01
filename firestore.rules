@@ -1,41 +1,42 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper to check if any user is logged in
-    function isAuthenticated() {
-      return true; // We can make it permissive or requireauth if they use auth, but since they use custom staff credentials login, client is fully authorized. Let's allow matches.
+
+    // 1. Global Safety Net (Default Catch-All Deny)
+    match /{document=**} {
+      allow read, write: if false;
     }
 
-    match /products/{productId} {
-      allow read, write: if true;
+    // 2. Global Security Helper Primitives
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    match /inventory/{inventoryId} {
-      allow read, write: if true;
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
     }
 
-    match /customers/{customerId} {
-      allow read, write: if true;
+    function incoming() {
+      return request.resource.data;
     }
 
-    match /suppliers/{supplierId} {
-      allow read, write: if true;
+    function isValidShopBackup(data) {
+      return data.userId is string 
+        && data.userId.size() <= 128 
+        && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.updatedAt is string;
     }
 
-    match /invoices/{invoiceId} {
-      allow read, write: if true;
-    }
-
-    match /importSlips/{slipId} {
-      allow read, write: if true;
-    }
-
-    match /staffs/{staffId} {
-      allow read, write: if true;
-    }
-
-    match /securityLogs/{logId} {
-      allow read, write: if true;
+    // 3. User isolated /shops/{userId} backup collection matching blueprint
+    match /shops/{userId} {
+      allow read: if isOwner(userId);
+      allow delete: if isOwner(userId);
+      allow create: if isOwner(userId) 
+        && isValidShopBackup(incoming()) 
+        && incoming().userId == request.auth.uid;
+      allow update: if isOwner(userId) 
+        && isValidShopBackup(incoming()) 
+        && incoming().userId == request.auth.uid;
     }
   }
 }

@@ -29,7 +29,8 @@ import {
   Zap,
   UserPlus,
   PlusCircle,
-  Sparkles
+  Sparkles,
+  Cloud
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -64,6 +65,7 @@ import InvoicesList from './components/InvoicesList';
 import Reports from './components/Reports';
 import SettingsStaff from './components/SettingsStaff';
 import PrintModal from './components/PrintModal';
+import GoogleDriveSync from './components/GoogleDriveSync';
 import { extractDominantColor, adjustHueAndLightness } from './utils';
 
 const vndiWeeks = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
@@ -1341,6 +1343,7 @@ export default function App() {
               { id: 'customers', label: 'Đối tác', icon: Users },
               { id: 'ledger', label: 'Đơn hàng', icon: FileText },
               (!isWarehouseStaffOnly ? { id: 'reports', label: 'Báo cáo', icon: BarChart } : null),
+              { id: 'drive', label: 'Google Drive', icon: Cloud },
               { id: 'settings', label: 'Cài đặt', icon: Settings }
             ].filter(Boolean).map((item: any) => {
               const IconComponent = item.icon;
@@ -1651,6 +1654,18 @@ export default function App() {
 
           <button
             type="button"
+            onClick={() => setActiveTab('drive')}
+            className={`px-5 py-3 md:py-3.5 font-bold flex items-center justify-center gap-2 transition-all duration-150 cursor-pointer h-full border-r border-slate-800/80 ${
+              activeTab === 'drive' 
+                ? 'bg-[#E11D48] text-white shadow-inner font-extrabold' 
+                : 'text-slate-355 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Cloud className="w-4 h-4 shrink-0" /> CLOUD
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('settings')}
             className={`px-5 py-3 md:py-3.5 font-bold flex items-center justify-center gap-2 transition-all duration-150 cursor-pointer h-full ${
               activeTab === 'settings' 
@@ -1762,6 +1777,60 @@ export default function App() {
             products={products}
             customers={customers}
             suppliers={suppliers}
+          />
+        )}
+
+        {activeTab === 'drive' && (
+          <GoogleDriveSync
+            products={products}
+            inventory={inventory}
+            customers={customers}
+            suppliers={suppliers}
+            invoices={invoices}
+            importSlips={importSlips}
+            staffs={staffs}
+            settings={settings}
+            securityLogs={securityLogs}
+            currentStaffName={activeStaff.tenNV}
+            onRestoreState={(restoredData) => {
+              if (restoredData.products) {
+                setProducts(restoredData.products);
+                localStorage.setItem('phpos_products', JSON.stringify(restoredData.products));
+              }
+              if (restoredData.inventory) {
+                setInventory(restoredData.inventory);
+                localStorage.setItem('phpos_inventory', JSON.stringify(restoredData.inventory));
+              }
+              if (restoredData.customers) {
+                setCustomers(restoredData.customers);
+                localStorage.setItem('phpos_customers', JSON.stringify(restoredData.customers));
+              }
+              if (restoredData.suppliers) {
+                setSuppliers(restoredData.suppliers);
+                localStorage.setItem('phpos_suppliers', JSON.stringify(restoredData.suppliers));
+              }
+              if (restoredData.invoices) {
+                setInvoices(restoredData.invoices);
+                localStorage.setItem('phpos_invoices', JSON.stringify(restoredData.invoices));
+              }
+              if (restoredData.importSlips) {
+                setImportSlips(restoredData.importSlips);
+                localStorage.setItem('phpos_import_slips', JSON.stringify(restoredData.importSlips));
+              }
+              if (restoredData.staffs) {
+                setStaffs(restoredData.staffs);
+                localStorage.setItem('phpos_staffs', JSON.stringify(restoredData.staffs));
+              }
+              if (restoredData.settings) {
+                setSettings(restoredData.settings);
+                localStorage.setItem('phpos_settings', JSON.stringify(restoredData.settings));
+              }
+              if (restoredData.securityLogs) {
+                setSecurityLogs(restoredData.securityLogs);
+                localStorage.setItem('phpos_security_logs', JSON.stringify(restoredData.securityLogs));
+              }
+            }}
+            onAddSecurityLog={addSecurityLog}
           />
         )}
 

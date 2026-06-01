@@ -14,11 +14,11 @@ import {
 import firebaseConfig from "../firebase-applet-config.json";
 
 // Initialize Firebase App
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 
 // Initialize Firestore
 // In multi-database environments, the default instance might need to use the specified firestoreDatabaseId if configured
-export const db = getFirestore(app);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 // Helper error tracker
 export interface FirestoreErrorInfo {
