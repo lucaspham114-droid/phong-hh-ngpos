@@ -1,0 +1,187 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Product details in the catalog",
+      "type": "object",
+      "properties": {
+        "maSP": { "type": "string" },
+        "tenSP": { "type": "string" },
+        "nhomHang": { "type": "string" },
+        "dvt": { "type": "string" },
+        "maVach": { "type": "string" },
+        "tuKhoa": { "type": "string" },
+        "giaNhap": { "type": "number" },
+        "giaBan": { "type": "number" },
+        "trangThai": { "type": "string", "enum": ["Bán", "Ngừng bán"] },
+        "image": { "type": "string" }
+      },
+      "required": ["maSP", "tenSP", "giaBan", "trangThai"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Inventory status and metrics of a product",
+      "type": "object",
+      "properties": {
+        "maSP": { "type": "string" },
+        "tenSP": { "type": "string" },
+        "tonDau": { "type": "number" },
+        "tongNhap": { "type": "number" },
+        "tongBan": { "type": "number" },
+        "tonHienTai": { "type": "number" },
+        "tonToiThieu": { "type": "number" },
+        "trangThai": { "type": "string", "enum": ["Đủ hàng", "Sắp hết", "Hết hàng", "Âm kho"] }
+      },
+      "required": ["maSP", "tenSP", "tonHienTai", "trangThai"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer profiles and their balance details",
+      "type": "object",
+      "properties": {
+        "maKH": { "type": "string" },
+        "tenKH": { "type": "string" },
+        "sdt": { "type": "string" },
+        "diaChi": { "type": "string" },
+        "tongTien": { "type": "number" },
+        "daTra": { "type": "number" },
+        "conNo": { "type": "number" }
+      },
+      "required": ["maKH", "tenKH", "sdt"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Supplier profiles and outstanding balances",
+      "type": "object",
+      "properties": {
+        "maNCC": { "type": "string" },
+        "tenNCC": { "type": "string" },
+        "sdt": { "type": "string" },
+        "diaChi": { "type": "string" },
+        "nguoiLienHe": { "type": "string" },
+        "tongNhap": { "type": "number" },
+        "daTra": { "type": "number" },
+        "conNo": { "type": "number" }
+      },
+      "required": ["maNCC", "tenNCC", "sdt"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Retail checkout bill",
+      "type": "object",
+      "properties": {
+        "maHD": { "type": "string" },
+        "ngay": { "type": "string" },
+        "maKH": { "type": "string" },
+        "tenKH": { "type": "string" },
+        "sdtKH": { "type": "string" },
+        "tongTien": { "type": "number" },
+        "giamGia": { "type": "number" },
+        "daTra": { "type": "number" },
+        "conNo": { "type": "number" },
+        "nhanVien": { "type": "string" },
+        "trangThai": { "type": "string", "enum": ["Hoàn thành", "Đã hủy"] },
+        "lyDoHuy": { "type": "string" },
+        "nguoiHuy": { "type": "string" },
+        "ngayHuy": { "type": "string" },
+        "details": {
+          "type": "array"
+        }
+      },
+      "required": ["maHD", "ngay", "maKH", "tenKH", "tongTien", "daTra", "trangThai"]
+    },
+    "ImportSlip": {
+      "title": "ImportSlip",
+      "description": "Wholesale merchandise import record",
+      "type": "object",
+      "properties": {
+        "maPN": { "type": "string" },
+        "ngayMoi": { "type": "string" },
+        "maNCC": { "type": "string" },
+        "tenNCC": { "type": "string" },
+        "sdtNCC": { "type": "string" },
+        "tongTien": { "type": "number" },
+        "daTra": { "type": "number" },
+        "conNo": { "type": "number" },
+        "nhanVien": { "type": "string" },
+        "trangThai": { "type": "string", "enum": ["Hoàn thành", "Phiếu tạm", "Đã hủy"] },
+        "lyDoHuy": { "type": "string" },
+        "nguoiHuy": { "type": "string" },
+        "ngayHuy": { "type": "string" },
+        "details": {
+          "type": "array"
+        }
+      },
+      "required": ["maPN", "ngayMoi", "maNCC", "tenNCC", "tongTien", "daTra", "trangThai"]
+    },
+    "Staff": {
+      "title": "Staff",
+      "description": "Staff files and user credentials",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenNV": { "type": "string" },
+        "vaiTro": { "type": "string", "enum": ["Admin", "Quản lý", "Nhân viên kho", "Nhân viên bán hàng"] },
+        "sdt": { "type": "string" },
+        "active": { "type": "boolean" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "mustChangePassword": { "type": "boolean" },
+        "status": { "type": "string" },
+        "lastLoginAt": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "tenNV", "vaiTro", "active"]
+    },
+    "SecurityLog": {
+      "title": "SecurityLog",
+      "description": "System access audit and safety logs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "action": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "userName", "action", "description", "createdAt"]
+    }
+  },
+  "firestore": {
+    "products/{productId}": {
+      "schema": "Product",
+      "description": "Products in catalog"
+    },
+    "inventory/{inventoryId}": {
+      "schema": "InventoryItem",
+      "description": "Stock levels of products"
+    },
+    "customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Customer accounts"
+    },
+    "suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Supplier accounts"
+    },
+    "invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Sales invoices"
+    },
+    "importSlips/{slipId}": {
+      "schema": "ImportSlip",
+      "description": "Product purchase imports"
+    },
+    "staffs/{staffId}": {
+      "schema": "Staff",
+      "description": "Staff credentials and files"
+    },
+    "securityLogs/{logId}": {
+      "schema": "SecurityLog",
+      "description": "Audit and logs"
+    }
+  }
+}

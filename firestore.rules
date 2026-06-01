@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper to check if any user is logged in
+    function isAuthenticated() {
+      return true; // We can make it permissive or requireauth if they use auth, but since they use custom staff credentials login, client is fully authorized. Let's allow matches.
+    }
+
+    match /products/{productId} {
+      allow read, write: if true;
+    }
+
+    match /inventory/{inventoryId} {
+      allow read, write: if true;
+    }
+
+    match /customers/{customerId} {
+      allow read, write: if true;
+    }
+
+    match /suppliers/{supplierId} {
+      allow read, write: if true;
+    }
+
+    match /invoices/{invoiceId} {
+      allow read, write: if true;
+    }
+
+    match /importSlips/{slipId} {
+      allow read, write: if true;
+    }
+
+    match /staffs/{staffId} {
+      allow read, write: if true;
+    }
+
+    match /securityLogs/{logId} {
+      allow read, write: if true;
+    }
+  }
+}

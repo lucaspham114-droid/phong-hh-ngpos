@@ -1,16 +1,26 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Search, 
   User, 
   Trash2, 
   Plus, 
   Minus, 
-  CornerDownLeft, 
   Save, 
   Printer, 
   X, 
   ArrowLeft,
-  UserPlus
+  UserPlus,
+  MoreVertical,
+  Tag,
+  Barcode,
+  Grid,
+  Check,
+  RotateCcw,
+  RefreshCw,
+  Coins,
+  Settings,
+  HelpCircle,
+  FileSpreadsheet
 } from 'lucide-react';
 import { Product, Customer, Invoice, InvoiceDetail, InventoryItem, SystemSettings } from '../types';
 import { formatVND, smartMatch, generateId } from '../utils';
@@ -28,6 +38,25 @@ interface SalesProps {
   onPrintDraft?: (draftInvoice: Invoice) => void;
 }
 
+interface CartItem {
+  product: Product;
+  quantity: number;
+  unitPriceOverride?: number; // custom unit price
+  discountValue?: number;     // custom discount
+  discountType?: 'VND' | '%'; // custom discount type
+}
+
+interface InvoiceTab {
+  id: string;
+  name: string;
+  cart: CartItem[];
+  selectedCustomerId: string;
+  customerSearch: '';
+  customerPaid: string;
+  discount: number;
+  note: string;
+}
+
 export default function Sales({
   products,
   customers,
@@ -40,41 +69,82 @@ export default function Sales({
   onUpdateTemplate,
   onPrintDraft
 }: SalesProps) {
-  // POS Search states
+  
+  // Multiple tabs support to match KiotViet
+  const [tabs, setTabs] = useState<InvoiceTab[]>([
+    {
+      id: 'tab_1',
+      name: 'Hóa đơn 1',
+      cart: [],
+      selectedCustomerId: 'KH000004', // Default to Walk-in customer ("Khách vãng lai")
+      customerSearch: '',
+      customerPaid: '',
+      discount: 0,
+      note: ''
+    }
+  ]);
+  const [activeTabId, setActiveTabId] = useState<string>('tab_1');
+
+  // Active tab state extraction
+  const activeTab = useMemo(() => {
+    return tabs.find(t => t.id === activeTabId) || tabs[0];
+  }, [tabs, activeTabId]);
+
+  const cart = activeTab.cart;
+  const selectedCustomerId = activeTab.selectedCustomerId;
+  const customerPaid = activeTab.customerPaid;
+  const discount = activeTab.discount;
+  const note = activeTab.note;
+
+  // Update a field inside the active tab
+  const updateActiveTabState = (updater: Partial<InvoiceTab> | ((t: InvoiceTab) => InvoiceTab)) => {
+    setTabs(prev => prev.map(t => {
+      if (t.id === activeTabId) {
+        if (typeof updater === 'function') {
+          return updater(t);
+        }
+        return { ...t, ...updater };
+      }
+      return t;
+    }));
+  };
+
+  // State for active popup over Price Input per item
+  const [activePricePopupIndex, setActivePricePopupIndex] = useState<number | null>(null);
+
+  // States for search inputs
   const [productSearch, setProductSearch] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
-  
-  // Active/selected customer
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('KH000004'); // default to Quick customer/Khách vãng lai
-  
-  // Cart items
-  const [cart, setCart] = useState<{ product: Product; quantity: number }[]>([]);
-  
-  // Financial values
-  const [discount, setDiscount] = useState<number>(0);
-  const [customerPaid, setCustomerPaid] = useState<string>(''); // string to ease inputs, parses to number
+  const [paymentMode, setPaymentMode] = useState<'Kcash' | 'Ktransfer' | 'Kcard'>('Kcash');
 
-  useEffect(() => {
-    const handleNewSale = () => {
-      setCart([]);
-      setDiscount(0);
-      setCustomerPaid('');
-      setProductSearch('');
-      setCustomerSearch('');
-      setSelectedCustomerId('KH000004'); // default
-    };
-    window.addEventListener('open-new-sale', handleNewSale);
-    return () => window.removeEventListener('open-new-sale', handleNewSale);
-  }, []);
-
-  // Quick Customer Creation Popup state
+  // Trigger add/create client popup
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
   const [newCustAddr, setNewCustAddr] = useState('');
   const [justAddedCustomer, setJustAddedCustomer] = useState<Customer | null>(null);
 
-  // Local list of customers (merge with justAdded)
+  // Focus ref for inputs
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Live Clock display
+  const [currentTimeStr, setCurrentTimeStr] = useState('');
+  useEffect(() => {
+    const updateTime = () => {
+      const d = new Date();
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      const hh = String(d.getHours()).padStart(2, '0');
+      const min = String(d.getMinutes()).padStart(2, '0');
+      setCurrentTimeStr(`${dd}/${mm}/${yyyy} ${hh}:${min}`);
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Merge with quick created customers
   const allCustomers = useMemo(() => {
     if (justAddedCustomer) {
       return [...customers, justAddedCustomer];
@@ -82,12 +152,12 @@ export default function Sales({
     return customers;
   }, [customers, justAddedCustomer]);
 
-  // Selected customer details
+  // Selected client
   const currentCustomer = useMemo(() => {
-    return allCustomers.find(c => c.maKH === selectedCustomerId) || allCustomers[3];
+    return allCustomers.find(c => c.maKH === selectedCustomerId) || allCustomers.find(c => c.maKH === 'KH000004') || allCustomers[0];
   }, [allCustomers, selectedCustomerId]);
 
-  // Filtered customers list for autocomplete search
+  // Filter client search matches
   const filteredCustomers = useMemo(() => {
     if (!customerSearch) return [];
     return allCustomers.filter(c => 
@@ -97,13 +167,10 @@ export default function Sales({
     );
   }, [allCustomers, customerSearch]);
 
-  // Filtered products list for POS Left side
-  const filteredProducts = useMemo(() => {
-    // Only active products
+  // Match products from search box in the Header
+  const matchedProdList = useMemo(() => {
+    if (!productSearch) return [];
     const activeProds = products.filter(p => p.trangThai === 'Bán');
-    if (!productSearch) {
-      return activeProds.slice(0, 8); // default show 8 products
-    }
     return activeProds.filter(p => 
       smartMatch(p.tenSP, productSearch, p.tuKhoa) || 
       smartMatch(p.maSP, productSearch) || 
@@ -112,119 +179,264 @@ export default function Sales({
     );
   }, [products, productSearch]);
 
-  // Inventory maps
   const getStock = (maSP: string) => {
     const inv = inventory.find(i => i.maSP === maSP);
     return inv ? inv.tonHienTai : 0;
   };
 
-  // Add Item to Cart
-  const addToCart = (product: Product) => {
-    const currentStock = getStock(product.maSP);
-    
-    setCart(prev => {
-      const existing = prev.find(item => item.product.maSP === product.maSP);
-      if (existing) {
-        // Warning: Check stock limits
-        if (existing.quantity >= currentStock) {
-          alert(`Cảnh báo: Mặt hàng "${product.tenSP}" chỉ còn tồn ${currentStock} cái trong kho.`);
-        }
-        return prev.map(item => 
-          item.product.maSP === product.maSP 
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        );
-      } else {
-        if (currentStock <= 0) {
-          alert(`Cảnh báo: Mặt hàng "${product.tenSP}" đã hết hàng trong kho. Vẫn tiếp tục bán âm?`);
-        }
-        return [...prev, { product, quantity: 1 }];
-      }
-    });
-    setProductSearch('');
+  // Add tab function
+  const handleAddNewTab = () => {
+    const nextTabId = `tab_${Date.now()}`;
+    const nextTabName = `Hóa đơn ${tabs.length + 1}`;
+    const newTab: InvoiceTab = {
+      id: nextTabId,
+      name: nextTabName,
+      cart: [],
+      selectedCustomerId: 'KH000004',
+      customerSearch: '',
+      customerPaid: '',
+      discount: 0,
+      note: ''
+    };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(nextTabId);
   };
 
-  // Modify quantities from Input / Buttons
-  const updateQuantity = (maSP: string, qty: number) => {
-    const currentStock = getStock(maSP);
+  // Remove tab function
+  const handleRemoveTab = (e: React.MouseEvent, targetId: string) => {
+    e.stopPropagation();
+    if (tabs.length === 1) return; // Keep at least one
+    
+    const activeIndex = tabs.findIndex(t => t.id === activeTabId);
+    const updatedTabs = tabs.filter(t => t.id !== targetId);
+    setTabs(updatedTabs);
+
+    if (activeTabId === targetId) {
+      // Shift focus
+      const fallbackIndex = Math.max(0, activeIndex - 1);
+      setActiveTabId(updatedTabs[fallbackIndex].id);
+    }
+  };
+
+  // Add Item to active tab cart
+  const handleAddItemToCart = (p: Product) => {
+    const stock = getStock(p.maSP);
+    
+    updateActiveTabState(tab => {
+      const existingIndex = tab.cart.findIndex(item => item.product.maSP === p.maSP);
+      let updatedCart = [...tab.cart];
+
+      if (existingIndex > -1) {
+        const existingItem = updatedCart[existingIndex];
+        if (existingItem.quantity >= stock) {
+          alert(`Cảnh báo: Mặt hàng "${p.tenSP}" chỉ còn tồn ${stock} cái trong kho.`);
+        }
+        updatedCart[existingIndex] = {
+          ...existingItem,
+          quantity: existingItem.quantity + 1
+        };
+      } else {
+        if (stock <= 0) {
+          alert(`Cảnh báo: Mặt hàng "${p.tenSP}" đã hết hàng trong kho. Vẫn tiếp tục bán âm?`);
+        }
+        updatedCart.push({
+          product: p,
+          quantity: 1,
+          discountValue: 0,
+          discountType: 'VND',
+          unitPriceOverride: p.giaBan
+        });
+      }
+
+      return {
+        ...tab,
+        cart: updatedCart
+      };
+    });
+
+    setProductSearch('');
+    // Auto-focus back to product search
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  };
+
+  // Modify quantity inside active cart
+  const handleUpdateCartItemQty = (maSP: string, qty: number) => {
     if (qty <= 0) {
-      removeFromCart(maSP);
+      handleRemoveCartItem(maSP);
       return;
     }
-    
-    if (qty > currentStock) {
-      alert(`Số lượng yêu cầu vượt quá số lượng tồn ${currentStock} trong kho.`);
+
+    const stock = getStock(maSP);
+    if (qty > stock) {
+      alert(`Số lượng yêu cầu vượt quá số lượng tồn ${stock} trong kho.`);
     }
 
-    setCart(prev => 
-      prev.map(item => 
-        item.product.maSP === maSP ? { ...item, quantity: qty } : item
-      )
-    );
+    updateActiveTabState(tab => {
+      return {
+        ...tab,
+        cart: tab.cart.map(item => 
+          item.product.maSP === maSP ? { ...item, quantity: qty } : item
+        )
+      };
+    });
   };
 
-  // Remove item
-  const removeFromCart = (maSP: string) => {
-    setCart(prev => prev.filter(item => item.product.maSP !== maSP));
+  // Remove individual item from cart
+  const handleRemoveCartItem = (maSP: string) => {
+    updateActiveTabState(tab => {
+      return {
+        ...tab,
+        cart: tab.cart.filter(item => item.product.maSP !== maSP)
+      };
+    });
   };
 
-  // Totals calculations
-  const subtotal = useMemo(() => {
-    return cart.reduce((sum, item) => sum + (item.product.giaBan * item.quantity), 0);
+  // Calculate pricing breakdown per item in cart
+  const getSellingPrice = (item: CartItem) => {
+    const originalPrice = item.product.giaBan;
+    if (item.unitPriceOverride !== undefined) {
+      return item.unitPriceOverride;
+    }
+    return originalPrice;
+  };
+
+  const getSubtotalForItem = (item: CartItem) => {
+    return getSellingPrice(item) * item.quantity;
+  };
+
+  // Total invoice calculated sum
+  const subtotalSum = useMemo(() => {
+    return cart.reduce((sum, item) => sum + getSubtotalForItem(item), 0);
   }, [cart]);
 
   const totalToPay = useMemo(() => {
-    const total = subtotal - discount;
+    const total = subtotalSum - discount;
     return total < 0 ? 0 : total;
-  }, [subtotal, discount]);
+  }, [subtotalSum, discount]);
 
-  const paidAmount = useMemo(() => {
-    if (customerPaid === '') return totalToPay; // Default pays fully
+  // Payment defaults and change computed values
+  const paidSecAmount = useMemo(() => {
+    if (customerPaid === '') return totalToPay;
     const parsed = parseFloat(customerPaid);
     return isNaN(parsed) ? 0 : parsed;
   }, [customerPaid, totalToPay]);
 
-  const remainingDebt = useMemo(() => {
-    const debt = totalToPay - paidAmount;
+  const remainingChange = useMemo(() => {
+    const extra = paidSecAmount - totalToPay;
+    return extra < 0 ? 0 : extra;
+  }, [totalToPay, paidSecAmount]);
+
+  const currentDebtAmount = useMemo(() => {
+    const debt = totalToPay - paidSecAmount;
     return debt < 0 ? 0 : debt;
-  }, [totalToPay, paidAmount]);
+  }, [totalToPay, paidSecAmount]);
 
-  // Trigger quick cash click options
-  const handlePayFully = () => {
-    setCustomerPaid(totalToPay.toString());
+  // Generate suggested quick cash payments
+  const suggestedCashTotals = useMemo(() => {
+    const t = totalToPay;
+    if (t === 0) return [0];
+    
+    // Round factors: exact, next 1k, next 5k, next 10k, next 20k, etc.
+    const exact = t;
+    const next5k = Math.ceil(t / 5000) * 5000;
+    const next10k = Math.ceil(t / 10000) * 10000;
+    const next20k = Math.ceil(t / 20000) * 20000;
+    const next50k = Math.ceil(t / 50000) * 50000;
+    const next100k = Math.ceil(t / 100000) * 100000;
+    const next500k = Math.ceil(t / 500000) * 500000;
+
+    const uniqueOptions = Array.from(new Set([exact, next5k, next10k, next20k, next50k, next100k, next500k]))
+      .filter(x => x >= t)
+      .slice(0, 6);
+
+    return uniqueOptions;
+  }, [totalToPay]);
+
+  // Cancel sales reset active cart
+  const handleCancelSales = () => {
+    if (cart.length > 0) {
+      if (confirm('Bạn có chắc chắn muốn hủy bỏ hóa đơn bán lẻ này?')) {
+        updateActiveTabState({
+          cart: [],
+          discount: 0,
+          customerPaid: '',
+          note: '',
+          selectedCustomerId: 'KH000004'
+        });
+      }
+    } else {
+      onNavigate('dashboard');
+    }
   };
 
-  const handlePayZero = () => {
-    setCustomerPaid('0');
-  };
-
-  // Print preview for draft receipt (phiếu tạm tính)
-  const handlePrintTemporary = () => {
+  // Submit and fire onSaveInvoice
+  const handleCheckoutInvoice = () => {
     if (cart.length === 0) {
-      alert('Vui lòng thêm sản phẩm vào giỏ hàng trước khi in phiếu tạm.');
+      alert('Giỏ hàng trống! Vui lòng chọn sản phẩm trước khi thanh toán.');
       return;
     }
 
-    const maHD = 'HD-TAMTINH';
+    const mhdPlaceholder = 'HD-TEMP';
     const invoiceDetails: InvoiceDetail[] = cart.map(item => ({
-      maHD,
+      maHD: mhdPlaceholder,
       maSP: item.product.maSP,
       tenSP: item.product.tenSP,
       soLuong: item.quantity,
-      donGia: item.product.giaBan,
-      thanhTien: item.product.giaBan * item.quantity
+      donGia: getSellingPrice(item),
+      thanhTien: getSubtotalForItem(item)
     }));
 
-    const draftInvoice: Invoice = {
-      maHD,
+    const finalInvoice: Invoice = {
+      maHD: mhdPlaceholder,
       ngay: new Date().toISOString(),
       maKH: currentCustomer.maKH,
       tenKH: currentCustomer.tenKH,
       sdtKH: currentCustomer.sdt,
       tongTien: totalToPay,
       giamGia: discount,
-      daTra: paidAmount,
-      conNo: remainingDebt,
+      daTra: paidSecAmount,
+      conNo: currentDebtAmount,
+      nhanVien: currentStaffName,
+      trangThai: 'Hoàn thành',
+      details: invoiceDetails
+    };
+
+    onSaveInvoice(finalInvoice);
+
+    // Reset this tab
+    updateActiveTabState({
+      cart: [],
+      discount: 0,
+      customerPaid: '',
+      note: '',
+      selectedCustomerId: 'KH000004'
+    });
+  };
+
+  const handlePrintTemporary = () => {
+    if (cart.length === 0) return;
+    const mhdPlaceholder = 'HD-TAMTINH';
+    const invoiceDetails: InvoiceDetail[] = cart.map(item => ({
+      maHD: mhdPlaceholder,
+      maSP: item.product.maSP,
+      tenSP: item.product.tenSP,
+      soLuong: item.quantity,
+      donGia: getSellingPrice(item),
+      thanhTien: getSubtotalForItem(item)
+    }));
+
+    const draftInvoice: Invoice = {
+      maHD: mhdPlaceholder,
+      ngay: new Date().toISOString(),
+      maKH: currentCustomer.maKH,
+      tenKH: currentCustomer.tenKH,
+      sdtKH: currentCustomer.sdt,
+      tongTien: totalToPay,
+      giamGia: discount,
+      daTra: paidSecAmount,
+      conNo: currentDebtAmount,
       nhanVien: currentStaffName,
       trangThai: 'Hoàn thành',
       details: invoiceDetails
@@ -235,23 +447,8 @@ export default function Sales({
     }
   };
 
-  // Clear state on cancel
-  const handleCancelSales = () => {
-    if (cart.length > 0) {
-      if (confirm('Bạn có chắc chắn muốn hủy bỏ giỏ hàng bán lẻ này?')) {
-        setCart([]);
-        setDiscount(0);
-        setCustomerPaid('');
-        setProductSearch('');
-        setCustomerSearch('');
-      }
-    } else {
-      onNavigate('dashboard');
-    }
-  };
-
-  // Add quick customer
-  const handleAddQuickCustomer = (e: React.FormEvent) => {
+  // Add quick client list builder
+  const handleAddQuickCustomerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCustName.trim()) return;
 
@@ -259,561 +456,808 @@ export default function Sales({
     const newCust: Customer = {
       maKH: newId,
       tenKH: newCustName.trim(),
-      sdt: newCustPhone.trim() || '09xxxxxx',
-      diaChi: newCustAddr.trim() || 'Tại cửa hàng',
+      sdt: newCustPhone.trim() || '0901234567',
+      diaChi: newCustAddr.trim() || 'Khách vãng lai tại quầy',
       tongTien: 0,
       daTra: 0,
       conNo: 0
     };
 
     setJustAddedCustomer(newCust);
-    setSelectedCustomerId(newId);
+    updateActiveTabState({ selectedCustomerId: newId });
     setNewCustName('');
     setNewCustPhone('');
     setNewCustAddr('');
     setShowAddCustomer(false);
   };
 
-  // Validate and submit checkout
-  const handleSaveInvoice = () => {
-    if (cart.length === 0) {
-      alert('Vui lòng thêm sản phẩm vào giỏ hàng trước khi thanh toán.');
-      return;
+  // Popover calculator logic to change price overrides per product row in CART
+  const handlePricePopoverChange = (index: number, key: 'base' | 'discount' | 'sell', val: number, type?: 'VND' | '%') => {
+    const freshCart = [...cart];
+    const item = { ...freshCart[index] };
+    const base = item.product.giaBan;
+
+    if (key === 'base') {
+      // Just keep it or treat as base
+    } else if (key === 'discount') {
+      const mode = type || item.discountType || 'VND';
+      const discountVal = val;
+      const finalPrice = mode === 'VND' ? base - discountVal : base * (1 - discountVal / 100);
+
+      item.discountValue = discountVal;
+      item.discountType = mode;
+      item.unitPriceOverride = Math.max(0, finalPrice);
+    } else if (key === 'sell') {
+      const sellPrice = val;
+      const discountVal = base - sellPrice;
+      const discountPct = base > 0 ? (discountVal / base) * 100 : 0;
+
+      item.unitPriceOverride = Math.max(0, sellPrice);
+      item.discountType = item.discountType || 'VND';
+      if (item.discountType === 'VND') {
+        item.discountValue = discountVal;
+      } else {
+        item.discountValue = Math.max(0, Math.min(100, discountPct));
+      }
     }
 
-    const maHD = generateId(settings.prefixHD, invoicesPlaceholder); // we will generate ID safely downstream
-    
-    const invoiceDetails: InvoiceDetail[] = cart.map(item => ({
-      maHD,
-      maSP: item.product.maSP,
-      tenSP: item.product.tenSP,
-      soLuong: item.quantity,
-      donGia: item.product.giaBan,
-      thanhTien: item.product.giaBan * item.quantity
-    }));
-
-    const invoice: Invoice = {
-      maHD,
-      ngay: new Date().toISOString(),
-      maKH: currentCustomer.maKH,
-      tenKH: currentCustomer.tenKH,
-      sdtKH: currentCustomer.sdt,
-      tongTien: totalToPay,
-      giamGia: discount,
-      daTra: paidAmount,
-      conNo: remainingDebt,
-      nhanVien: currentStaffName,
-      trangThai: 'Hoàn thành',
-      details: invoiceDetails
-    };
-
-    onSaveInvoice(invoice);
-    
-    // Clear cart reset state
-    setCart([]);
-    setDiscount(0);
-    setCustomerPaid('');
-    setProductSearch('');
-    setCustomerSearch('');
-    setSelectedCustomerId('KH000004'); // default
+    freshCart[index] = item;
+    updateActiveTabState({ cart: freshCart });
   };
 
-  // Dummy list for generateId
-  const invoicesPlaceholder: any[] = []; // Parent App will control true generation
-
   return (
-    <div className="flex flex-col lg:flex-row gap-6">
-
-      {/* LEFT PANEL: SMART PRODUCT SEARCH & CATALOG */}
-      <div className="flex-1 space-y-4">
+    <div className="flex flex-col h-[calc(100vh-100px)] min-h-[550px] bg-slate-100/50 rounded-xl overflow-hidden shadow-inner font-sans border border-slate-200" id="pos-cashier-root">
+      
+      {/* 1. TOP HEADER - BLUE KIOTVIET SYSTEM STYLE BAR */}
+      <div className="h-14 bg-[#1E3A8A] flex items-center justify-between px-4 text-white select-none shrink-0" id="pos-kiot-header">
         
-        {/* Search header bar */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-gray-900">Danh mục hàng hóa</h2>
-            <span className="text-[10px] text-gray-500 font-mono">Nhân viên: <strong>{currentStaffName}</strong></span>
-          </div>
-          
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="h-5 h-5 text-gray-400" />
+        {/* Left side: Magnifying Search and barcode */}
+        <div className="flex items-center gap-2.5 flex-1 max-w-md relative z-40">
+          <div className="relative w-full">
+            <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-300">
+              <Search className="w-4 h-4" />
             </div>
             <input
               type="text"
-              id="product-sales-search"
-              className="block w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl bg-gray-50/50 text-xs focus:ring-red-500 focus:border-red-500 font-sans"
-              placeholder="Tìm sản phẩm [Tên / Mã / Viết tắt: ccd, ncd, ast / Loại...]"
+              ref={searchInputRef}
+              className="w-full bg-blue-900/60 pl-8 pr-8 py-1.5 rounded-md text-xs placeholder-slate-300 border border-blue-800 text-white focus:outline-none focus:bg-white focus:text-slate-900 focus:ring-2 focus:ring-blue-400 font-sans"
+              placeholder="Tìm hàng hóa [Tên / Mã vạch / SKU]..."
               value={productSearch}
               onChange={(e) => setProductSearch(e.target.value)}
             />
             {productSearch && (
               <button 
+                type="button"
                 onClick={() => setProductSearch('')}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer text-gray-400 hover:text-gray-600 text-xs"
+                className="absolute inset-y-0 right-2 flex items-center text-slate-300 hover:text-white text-xs cursor-pointer font-bold"
               >
-                Xóa
+                ✕
               </button>
             )}
           </div>
-        </div>
-
-        {/* Catalog of Matched Products */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-          <h3 className="text-xs font-bold text-gray-500 mb-3 tracking-wider uppercase">Kết quả khớp tìm kiếm</h3>
           
-          {filteredProducts.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 text-xs">
-              Không tìm thấy sản phẩm phù hợp.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {filteredProducts.map((p) => {
-                const stock = getStock(p.maSP);
-                const isInCart = cart.some(item => item.product.maSP === p.maSP);
-                const isOutOfStock = stock <= 0;
-                
-                return (
-                  <div 
-                    key={p.maSP}
-                    onClick={() => addToCart(p)}
-                    className={`p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between hover:shadow-md ${
-                      isInCart 
-                        ? 'border-red-400 bg-red-50/20' 
-                        : isOutOfStock 
-                          ? 'border-gray-200 bg-gray-50/50 opacity-70' 
-                          : 'border-gray-100 bg-white hover:border-gray-300'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex justify-between items-start">
-                        <span className="text-[9px] font-mono text-gray-400 font-bold uppercase">{p.maSP}</span>
-                        <span className="text-[9px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-medium">
-                          {p.nhomHang}
-                        </span>
+          {/* Barcode Simulator Button */}
+          <button
+            type="button"
+            title="Thử quét mã vạch sản phẩm ngẫu nhiên"
+            onClick={() => {
+              // Select direct random active item to scan
+              const target = products.filter(p => p.trangThai === 'Bán');
+              if (target.length > 0) {
+                const randProd = target[Math.floor(Math.random() * target.length)];
+                handleAddItemToCart(randProd);
+              }
+            }}
+            className="p-1.5 bg-blue-900/80 hover:bg-blue-800 rounded border border-blue-800 text-slate-200 hover:text-white transition cursor-pointer shrink-0"
+          >
+            <Barcode className="w-4 h-4" />
+          </button>
+
+          {/* Floated Dropdown matching product entries */}
+          {productSearch && (
+            <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-lg shadow-2xl max-h-72 overflow-y-auto divide-y divide-slate-100 text-slate-800 z-50">
+              {matchedProdList.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400">Không tìm thấy sản phẩm phù hợp.</div>
+              ) : (
+                matchedProdList.map((p) => {
+                  const stock = getStock(p.maSP);
+                  return (
+                    <div 
+                      key={p.maSP}
+                      onClick={() => handleAddItemToCart(p)}
+                      className="p-2 hover:bg-blue-50/50 cursor-pointer flex gap-3 items-center text-xs transition duration-150"
+                    >
+                      <div className="w-8 h-8 rounded bg-slate-100 flex-shrink-0 flex items-center justify-center overflow-hidden border border-slate-200">
+                        {p.image ? (
+                          <img src={p.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          <Grid className="w-4 h-4 text-slate-400" />
+                        )}
                       </div>
-                      <h4 className="text-xs font-bold text-gray-800 mt-1 min-h-[32px] line-clamp-2">{p.tenSP}</h4>
-                    </div>
-                    
-                    <div className="flex justify-between items-end mt-2 pt-2 border-t border-gray-50">
-                      <div className="text-[10px] text-gray-500">
-                        Giá: <strong className="text-gray-900 font-sans">{formatVND(p.giaBan)}</strong>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-slate-900 truncate">{p.tenSP}</p>
+                        <p className="text-[10px] text-slate-500 font-mono">ID: {p.maSP} | {p.maVach ? `MV: ${p.maVach}` : p.nhomHang}</p>
                       </div>
-                      
-                      {/* Stock indicator badge */}
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold font-mono ${
-                        isOutOfStock 
-                          ? 'bg-red-50 text-red-600' 
-                          : stock <= 5 
-                            ? 'bg-amber-50 text-amber-700' 
-                            : 'bg-green-50 text-green-700'
-                      }`}>
-                        Tồn: {stock} {p.dvt}
-                      </span>
+                      <div className="text-right">
+                        <p className="font-black font-mono text-emerald-700">{formatVND(p.giaBan)}</p>
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold ${
+                          stock <= 0 ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-700'
+                        }`}>Tồn: {stock}</span>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           )}
         </div>
 
-        {/* Quick select groups */}
-        <div className="flex flex-wrap gap-2 pt-1">
-          <button 
-            type="button"
-            onClick={() => setProductSearch('')}
-            className="px-3 py-1.5 text-xs font-medium rounded-full bg-white border border-gray-200 hover:bg-gray-50 cursor-pointer text-gray-700 transition"
-          >
-            Tất cả
-          </button>
-          <button 
-            type="button"
-            onClick={() => setProductSearch('Điện gia dụng')}
-            className="px-3 py-1.5 text-xs font-medium rounded-full bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 cursor-pointer text-indigo-700 transition"
-          >
-            🔌 Điện gia dụng
-          </button>
-          <button 
-            type="button"
-            onClick={() => setProductSearch('Đồ nhựa')}
-            className="px-3 py-1.5 text-xs font-medium rounded-full bg-amber-50 border border-amber-100 hover:bg-amber-100 cursor-pointer text-amber-700 transition"
-          >
-            🪣 Đồ nhựa Duy Tân
-          </button>
-          <button 
-            type="button"
-            onClick={() => setProductSearch('Nhà bếp')}
-            className="px-3 py-1.5 text-xs font-medium rounded-full bg-rose-50 border border-rose-100 hover:bg-rose-100 cursor-pointer text-rose-700 transition"
-          >
-            🍳 Nhà bếp / Chảo
-          </button>
-        </div>
-
-      </div>
-
-      {/* RIGHT PANEL: BILL CONTROL & CUSTOMER SELECTOR */}
-      <div className="w-full lg:w-[420px] space-y-4">
-        
-        {/* Customer Selector Frame */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 space-y-3 relative z-30">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-              <User className="w-4 h-4 text-gray-500" />
-              Khách hàng giao dịch
-            </h2>
-            <button
-              type="button"
-              id="add-quick-cust-btn"
-              onClick={() => setShowAddCustomer(true)}
-              className="text-[10px] text-red-600 font-bold flex items-center gap-0.5 hover:underline cursor-pointer"
-            >
-              <UserPlus className="w-3 h-3" /> Thêm nhanh KH
-            </button>
-          </div>
-
-          {/* Autocomplete Input */}
-          <div className="relative">
-            <input
-              type="text"
-              id="pos-customer-search-input"
-              className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-sans placeholder:text-gray-400"
-              placeholder="Tìm khách hàng [Tên / SĐT / Địa chỉ]"
-              value={customerSearch}
-              onChange={(e) => setCustomerSearch(e.target.value)}
-            />
-            {customerSearch && (
-              <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto z-50 divide-y divide-gray-100">
-                {filteredCustomers.length === 0 ? (
-                  <p className="p-3 text-center text-[11px] text-gray-400">Không có khách hàng trùng khớp.</p>
-                ) : (
-                  filteredCustomers.map((cust) => (
-                    <div
-                      key={cust.maKH}
-                      onClick={() => {
-                        setSelectedCustomerId(cust.maKH);
-                        setCustomerSearch('');
-                      }}
-                      className="p-2 hover:bg-gray-50 text-[11px] cursor-pointer flex justify-between items-center"
-                    >
-                      <div>
-                        <strong className="text-gray-800">{cust.tenKH}</strong>
-                        <p className="text-[10px] text-gray-400">{cust.sdt} - {cust.diaChi}</p>
-                      </div>
-                      <span className="text-[9px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded font-mono font-bold">
-                        Nợ cũ: {formatVND(cust.conNo)}
-                      </span>
-                    </div>
-                  ))
+        {/* Center Section: Tabs manager */}
+        <div className="flex items-end gap-1 h-full pl-6 overflow-x-auto self-end max-w-md scrollbar-none">
+          {tabs.map((t, idx) => {
+            const isActive = t.id === activeTabId;
+            return (
+              <div
+                key={t.id}
+                onClick={() => {
+                  setActiveTabId(t.id);
+                  setActivePricePopupIndex(null);
+                }}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-t-md text-xs font-bold leading-none select-none cursor-pointer border-t border-x transition-all ${
+                  isActive 
+                    ? 'bg-slate-100/50 hover:bg-slate-100 text-slate-900 border-slate-300 shadow-sm relative z-10 font-black' 
+                    : 'bg-blue-950/60 border-transparent hover:bg-blue-900 text-slate-350 hover:text-white'
+                }`}
+              >
+                <span>{t.name}</span>
+                {tabs.length > 1 && (
+                  <button 
+                    type="button" 
+                    onClick={(e) => handleRemoveTab(e, t.id)}
+                    className="w-4 h-4 rounded-full flex items-center justify-center hover:bg-red-500 hover:text-white text-xs opacity-60 hover:opacity-100 transition-opacity"
+                  >
+                    ✕
+                  </button>
                 )}
               </div>
-            )}
-          </div>
-
-          {/* Selected Customer Card Display */}
-          <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-100 flex justify-between items-center text-xs">
-            <div>
-              <p className="font-bold text-slate-800">{currentCustomer.tenKH}</p>
-              <p className="text-[10px] text-slate-500 mt-0.5">SĐT: {currentCustomer.sdt}</p>
-              <p className="text-[10px] text-slate-500">ĐC: {currentCustomer.diaChi}</p>
-            </div>
-            <div className="text-right">
-              <span className="text-[9px] text-slate-400 block tracking-wider uppercase font-medium">Nợ cũ hiện tại</span>
-              <span className={`font-mono font-bold mt-0.5 inline-block text-xs ${currentCustomer.conNo > 0 ? 'text-red-600' : 'text-slate-500'}`}>
-                {formatVND(currentCustomer.conNo)}
-              </span>
-            </div>
-          </div>
+            );
+          })}
+          
+          <button
+            type="button"
+            onClick={handleAddNewTab}
+            className="p-1 px-2.5 mb-1.5 bg-blue-900 hover:bg-blue-800 text-white font-black text-sm rounded cursor-pointer self-center"
+            title="Mở thêm hóa đơn mới (vận hành đa phiên)"
+          >
+            +
+          </button>
         </div>
 
-        {/* The Cart list */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 divide-y divide-gray-100 overflow-hidden">
-          <div className="p-3 px-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
-            <span className="text-xs font-bold text-gray-700">Giỏ hàng ({cart.length})</span>
-            {cart.length > 0 && (
-              <button 
-                type="button" 
-                onClick={() => setCart([])}
-                className="text-[10px] text-rose-600 hover:underline cursor-pointer"
-              >
-                Xóa sạch giỏ
-              </button>
-            )}
+        {/* Right side: Utilities icons and name */}
+        <div className="flex items-center gap-3">
+          <div className="text-right text-[11px] font-mono leading-none hidden xl:block">
+            <span className="font-bold text-slate-200 block">Thu ngân: <strong className="text-white font-sans">{currentStaffName}</strong></span>
+            <span className="text-[9.5px] mt-0.5 block text-slate-400">{currentTimeStr || 'PH POS'}</span>
+          </div>
+          
+          {/* Refresh Action */}
+          <button 
+            type="button" 
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('sync-firebase'));
+              alert("Đang đồng bộ dữ liệu Hệ thống với máy chủ Firestore Cloud...");
+            }}
+            className="p-1.5 rounded bg-blue-900 hover:bg-blue-800 text-slate-200 hover:text-white transition cursor-pointer"
+            title="Đồng bộ thủ công"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+
+          <button 
+            type="button" 
+            onClick={() => onNavigate('dashboard')}
+            className="text-xs bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded-md font-bold tracking-wide transition flex items-center gap-1 select-none cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" /> TRỞ VỀ
+          </button>
+        </div>
+      </div>
+
+      {/* 2. MAIN CASHIER BODY SECTION */}
+      <div className="flex-1 flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-slate-200 overflow-hidden" id="pos-cashier-split">
+        
+        {/* LEFT CANVAS: ADDED ITEMS LIST (75% screen scope) */}
+        <div className="flex-1 overflow-hidden flex flex-col p-4 bg-slate-50/70" id="pos-items-table-area">
+          
+          <div className="flex-1 bg-white rounded-xl border border-slate-200/80 shadow-xs flex flex-col overflow-hidden">
+            
+            {/* Table headers line */}
+            <div className="grid grid-cols-12 bg-slate-100 p-2.5 border-b border-slate-200 text-[10.5px] font-black text-slate-600 uppercase font-sans shrink-0 items-center select-none">
+              <div className="col-span-1 text-center font-mono">STT</div>
+              <div className="col-span-1 text-center">Ảnh</div>
+              <div className="col-span-4 pl-2">Mã vạch / Tên hàng hóa</div>
+              <div className="col-span-2 text-center">Số lượng</div>
+              <div className="col-span-2 text-right pr-4">Đơn giá bán</div>
+              <div className="col-span-2 text-right pr-2">Thành tiền</div>
+            </div>
+
+            {/* Scrollable list cart mapping */}
+            <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+              {cart.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center p-8 text-center select-none">
+                  <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-300 mb-2.5">
+                    <Barcode className="w-8 h-8" />
+                  </div>
+                  <h4 className="font-bold text-slate-700 text-sm">Chưa có sản phẩm nào được chọn!</h4>
+                  <p className="text-xs text-slate-400 mt-1 max-w-xs">Sử dụng thanh tìm kiếm phía trên đầu trang để quét hoặc chọn hàng nhanh vào hóa đơn hiện hành.</p>
+                </div>
+              ) : (
+                cart.map((item, idx) => {
+                  const numIndex = cart.length - idx; // Display index like the picture (3, 2, 1)
+                  const originalPrice = item.product.giaBan;
+                  const sellPrice = getSellingPrice(item);
+                  const lineTotal = getSubtotalForItem(item);
+                  const isPopupOpen = activePricePopupIndex === idx;
+
+                  // Compute discounts for showing in popovers
+                  const currentDiscVal = item.discountValue !== undefined ? item.discountValue : 0;
+                  const currentDiscType = item.discountType || 'VND';
+
+                  return (
+                    <div 
+                      key={item.product.maSP} 
+                      className={`grid grid-cols-12 p-3 font-sans items-center group transition duration-150 border-l-[3px] ${
+                        isPopupOpen ? 'border-blue-500 bg-blue-50/10' : 'border-transparent hover:bg-slate-50/50'
+                      }`}
+                    >
+                      
+                      {/* Index & Delete Button */}
+                      <div className="col-span-1 flex flex-col items-center justify-center select-none relative">
+                        <span className="font-mono font-bold text-xs text-slate-450 group-hover:hidden">{numIndex}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveCartItem(item.product.maSP)}
+                          className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 cursor-pointer hidden group-hover:inline-block transition"
+                          title="Xóa dòng mặt hàng này"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* circular image thumbnail */}
+                      <div className="col-span-1 flex justify-center items-center select-none">
+                        <div className="w-9 h-9 rounded-full bg-slate-100/80 shrink-0 border border-slate-200 overflow-hidden flex items-center justify-center shadow-xs">
+                          {item.product.image ? (
+                            <img src={item.product.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <Grid className="w-4.5 h-4.5 text-slate-400" />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Barcode SKU & Title column and popup positioning context */}
+                      <div className="col-span-4 pl-2 relative">
+                        <span className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded font-mono font-bold uppercase select-all">
+                          {item.product.maVach || item.product.maSP}
+                        </span>
+                        <h4 className="text-xs font-bold text-slate-800 tracking-tight mt-1 group-hover:text-blue-700 transition-colors" title={item.product.tenSP}>
+                          {item.product.tenSP}
+                        </h4>
+                      </div>
+
+                      {/* Quantity display/underlined input */}
+                      <div className="col-span-2 flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateCartItemQty(item.product.maSP, item.quantity - 1)}
+                          className="w-5 h-5 rounded-md hover:bg-slate-100 flex items-center justify-center shrink-0 border border-slate-200 text-slate-500 hover:text-slate-800 cursor-pointer"
+                        >
+                          -
+                        </button>
+                        
+                        <input
+                          type="number"
+                          className="w-11 border-b-2 border-t-0 border-x-0 border-slate-300 focus:border-blue-600 bg-transparent py-0 px-0.5 text-center text-xs font-bold text-slate-900 focus:ring-0 font-mono"
+                          value={item.quantity}
+                          onChange={(e) => handleUpdateCartItemQty(item.product.maSP, parseInt(e.target.value) || 1)}
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateCartItemQty(item.product.maSP, item.quantity + 1)}
+                          className="w-5 h-5 rounded-md hover:bg-slate-100 flex items-center justify-center shrink-0 border border-slate-200 text-slate-500 hover:text-slate-800 cursor-pointer"
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      {/* Clickable Unit Price to pull up custom discount list popover */}
+                      <div className="col-span-2 text-right pr-4 relative">
+                        <span 
+                          onClick={() => setActivePricePopupIndex(isPopupOpen ? null : idx)}
+                          className="font-mono font-bold text-xs text-slate-900 border-b border-dashed border-slate-400 hover:border-blue-600 hover:text-blue-600 cursor-pointer transition py-0.5 inline-block"
+                          title="Hành động tinh chỉnh giá bán thực tế"
+                        >
+                          {formatVND(sellPrice)}
+                        </span>
+
+                        {isPopupOpen && (
+                          <div className="absolute right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-xl p-4 w-60 text-left z-50 text-slate-800 font-sans animate-in fade-in slide-in-from-top-1">
+                            <div className="flex justify-between items-center pb-2 border-b border-slate-100 mb-3">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Đơn giá bán chi tiết</span>
+                              <button 
+                                type="button" 
+                                onClick={() => setActivePricePopupIndex(null)}
+                                className="text-slate-400 hover:text-slate-700 font-black text-xs"
+                              >
+                                ✕
+                              </button>
+                            </div>
+
+                            <div className="space-y-3 text-xs">
+                              {/* 1. Base price of reference item */}
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-500">Đơn giá gốc:</span>
+                                <span className="font-mono font-bold text-slate-800">{formatVND(originalPrice)}</span>
+                              </div>
+
+                              {/* 2. Interactive Discount input & Switch selectors */}
+                              <div className="space-y-1">
+                                <span className="text-slate-500 block mb-1">Giảm giá:</span>
+                                <div className="flex items-center gap-1">
+                                  <input 
+                                    type="number"
+                                    className="w-24 px-2 py-1 border border-slate-300 rounded text-xs font-mono font-bold text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    value={currentDiscVal}
+                                    onChange={(e) => handlePricePopoverChange(idx, 'discount', Math.max(0, parseFloat(e.target.value) || 0))}
+                                  />
+                                  <div className="flex border border-slate-200 rounded overflow-hidden divide-x divide-slate-200 font-bold h-7 shrink-0">
+                                    <button 
+                                      type="button"
+                                      onClick={() => handlePricePopoverChange(idx, 'discount', currentDiscVal, 'VND')}
+                                      className={`px-2 text-[10px] transition cursor-pointer select-none ${
+                                        currentDiscType === 'VND' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      đ
+                                    </button>
+                                    <button 
+                                      type="button"
+                                      onClick={() => handlePricePopoverChange(idx, 'discount', currentDiscVal, '%')}
+                                      className={`px-2 text-[10px] transition cursor-pointer select-none ${
+                                        currentDiscType === '%' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      %
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* 3. Overridden Target Selling Price */}
+                              <div className="space-y-1 pt-1.5 border-t border-slate-100">
+                                <span className="text-slate-500 block">Giá bán thực tế:</span>
+                                <div className="relative">
+                                  <input 
+                                    type="number"
+                                    className="w-full pl-2 pr-7 py-1 border-b-2 border-slate-300 focus:border-blue-600 font-mono font-extrabold text-blue-700 text-sm focus:outline-none text-right bg-blue-50/20"
+                                    value={sellPrice}
+                                    onChange={(e) => handlePricePopoverChange(idx, 'sell', Math.max(0, parseInt(e.target.value) || 0))}
+                                  />
+                                  <div className="absolute inset-y-0 right-2 flex items-center pointer-events-none">
+                                    <Tag className="w-3.5 h-3.5 text-blue-400" />
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Submit button inside popover */}
+                              <button
+                                type="button"
+                                onClick={() => setActivePricePopupIndex(null)}
+                                className="w-full mt-2 py-1.5 bg-[#1E3A8A] hover:bg-blue-800 text-white font-bold rounded-md text-[10.5px] uppercase tracking-wide cursor-pointer transition shadow-sm text-center"
+                              >
+                                Xác nhận áp dụng
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Subtotal line text */}
+                      <div className="col-span-2 text-right pr-2">
+                        <span className="font-mono font-black text-xs text-slate-900">
+                          {formatVND(lineTotal)}
+                        </span>
+                      </div>
+
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Bottom notes line helper */}
+            <div className="p-3 bg-slate-50/50 border-t border-slate-100 flex items-center gap-3 shrink-0 select-none">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1 shrink-0">
+                📝 Ghi chú đơn:
+              </span>
+              <input
+                type="text"
+                className="flex-1 bg-transparent border-0 border-b border-transparent focus:border-slate-300 py-0.5 px-0 focus:outline-none focus:ring-0 text-xs text-slate-700 placeholder:text-slate-300 font-sans"
+                placeholder="Nhập ghi chú hóa đơn này nếu cần (mã giao dịch riêng, giao hàng, v.v.)..."
+                value={note}
+                onChange={(e) => updateActiveTabState({ note: e.target.value })}
+              />
+            </div>
+
           </div>
 
-          <div className="max-h-56 overflow-y-auto divide-y divide-gray-100">
-            {cart.length === 0 ? (
-              <div className="p-8 text-center text-gray-400 text-xs">
-                Chưa có mặt hàng trong giỏ. Chọn sản phẩm bên trái để bắt đầu bán.
-              </div>
-            ) : (
-              cart.map((item) => (
-                <div key={item.product.maSP} className="p-3 flex items-start justify-between gap-2 text-xs">
-                  <div className="flex-1 space-y-0.5 min-w-0">
-                    <p className="font-bold text-gray-800 truncate" title={item.product.tenSP}>{item.product.tenSP}</p>
-                    <p className="text-[10px] text-gray-500 font-sans">Đơn giá: {formatVND(item.product.giaBan)}</p>
-                  </div>
-                  
-                  {/* Quantity and Actions */}
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center border border-gray-300 rounded overflow-hidden h-7">
-                      <button
-                        type="button"
-                        onClick={() => updateQuantity(item.product.maSP, item.quantity - 1)}
-                        className="p-1 px-1.5 hover:bg-gray-100 cursor-pointer"
-                      >
-                        <Minus className="w-3 h-3 text-gray-600" />
-                      </button>
-                      <input
-                        type="number"
-                        className="w-10 border-0 p-0 text-center text-xs font-bold text-gray-800 font-mono focus:ring-0"
-                        value={item.quantity}
-                        onChange={(e) => updateQuantity(item.product.maSP, parseInt(e.target.value) || 1)}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => updateQuantity(item.product.maSP, item.quantity + 1)}
-                        className="p-1 px-1.5 hover:bg-gray-100 cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3 text-gray-600" />
-                      </button>
-                    </div>
+        </div>
 
+        {/* RIGHT PANEL: PAYMENT SUMMARY SIDEBAR (25% screen scope) */}
+        <div className="w-full lg:w-[360px] bg-white overflow-y-auto p-4 flex flex-col justify-between shrink-0" id="pos-billing-sidebar">
+          
+          {/* Top section: Customer metadata & Info */}
+          <div className="space-y-3.5">
+            
+            {/* 1. DateTime Clock and NV Indicator card */}
+            <div className="flex justify-between items-center text-[10.5px] text-slate-400 font-sans bg-slate-50 p-2.5 rounded-lg border border-slate-100 select-none">
+              <div className="flex items-center gap-1 font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                <span className="text-slate-800 uppercase">Phong Hung - {activeTab.name}</span>
+              </div>
+              <span className="font-mono text-slate-500 font-semibold">{currentTimeStr}</span>
+            </div>
+
+            {/* 2. Customer billing receiver selector box */}
+            <div className="space-y-2 relative z-30">
+              <div className="flex justify-between items-center select-none">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1 leading-none">
+                  <User className="w-3.5 h-3.5" /> Khách hàng
+                </span>
+                
+                <button
+                  type="button"
+                  onClick={() => setShowAddCustomer(true)}
+                  className="text-[10px] text-blue-700 hover:text-blue-900 font-extrabold hover:underline cursor-pointer flex items-center gap-0.5"
+                >
+                  <UserPlus className="w-3 h-3" /> THÊM KH
+                </button>
+              </div>
+
+              {/* Autocomplete Input */}
+              <div className="relative">
+                <input
+                  type="text"
+                  className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-sans focus:ring-1 focus:ring-blue-500 bg-slate-50/40"
+                  placeholder="🔍 Tìm khách [Tên / SĐT]..."
+                  value={customerSearch}
+                  onChange={(e) => setCustomerSearch(e.target.value)}
+                />
+                
+                {customerSearch && (
+                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-250 rounded-lg shadow-2xl max-h-48 overflow-y-auto divide-y divide-slate-100 z-50 text-[11px]">
+                    {filteredCustomers.length === 0 ? (
+                      <p className="p-3 text-center text-slate-400">Không tìm thấy khách hàng phù hợp.</p>
+                    ) : (
+                      filteredCustomers.map((c) => (
+                        <div
+                          key={c.maKH}
+                          onClick={() => {
+                            updateActiveTabState({ selectedCustomerId: c.maKH });
+                            setCustomerSearch('');
+                          }}
+                          className="p-2 hover:bg-slate-50 cursor-pointer flex justify-between items-center transition"
+                        >
+                          <div>
+                            <strong className="text-slate-800">{c.tenKH}</strong>
+                            <p className="text-[10px] text-slate-400 font-mono mt-0.5">{c.sdt} - {c.diaChi}</p>
+                          </div>
+                          {c.conNo > 0 && (
+                            <span className="bg-red-50 text-red-600 font-mono font-bold text-[9px] px-1.5 py-0.5 rounded">
+                              Nợ cũ: {formatVND(c.conNo)}
+                            </span>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Selected Customer Card Display */}
+              <div className="p-2.5 bg-slate-50/80 rounded-lg border border-slate-100 text-xs leading-normal">
+                <div className="flex justify-between items-center">
+                  <span className="font-extrabold text-slate-800 text-xs">{currentCustomer.tenKH}</span>
+                  <span className="font-mono text-[10px] text-slate-400">{currentCustomer.sdt}</span>
+                </div>
+                {currentCustomer.conNo > 0 && (
+                  <div className="mt-1.5 pt-1 border-t border-slate-200/50 flex justify-between items-center text-[10px]">
+                    <span className="text-slate-500 font-medium">⚠️ Công nợ cũ của khách:</span>
+                    <strong className="font-mono text-red-600 text-xs">{formatVND(currentCustomer.conNo)}</strong>
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+            {/* 3. Detailed calculation checklist */}
+            <div className="space-y-3 pt-2.5 border-t border-slate-150 text-xs">
+              
+              {/* Line 1: Sum product total lines */}
+              <div className="flex justify-between items-center text-slate-600 select-none">
+                <span>Tổng tiền hàng ({cart.length} nhóm):</span>
+                <span className="font-mono font-bold text-slate-850">{formatVND(subtotalSum)}</span>
+              </div>
+
+              {/* Line 2: General Order Discount input */}
+              <div className="space-y-1 pb-1.5 border-b border-slate-100 select-none">
+                <div className="flex justify-between items-center text-slate-600">
+                  <span>Giảm giá hóa đơn (đ):</span>
+                  <span className="font-mono font-bold text-red-700">-{formatVND(discount)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max={Math.min(subtotalSum, 1000000)}
+                    step="5000"
+                    className="w-full accent-[#1E3A8A]"
+                    value={discount}
+                    onChange={(e) => updateActiveTabState({ discount: parseInt(e.target.value) || 0 })}
+                  />
+                  <input
+                    type="number"
+                    step="1000"
+                    className="w-20 px-1 py-0.5 border border-slate-300 rounded text-right font-mono text-[11px] font-bold"
+                    value={discount}
+                    onChange={(e) => {
+                      const val = Math.min(subtotalSum, Math.max(0, parseInt(e.target.value) || 0));
+                      updateActiveTabState({ discount: val });
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Line 3: Final aggregate customer paid required sum */}
+              <div className="flex justify-between items-center pt-1 select-none">
+                <span className="font-extrabold text-slate-800 uppercase">Khách cần thanh toán:</span>
+                <span className="font-mono font-black text-red-600 text-sm">{formatVND(totalToPay)}</span>
+              </div>
+
+              {/* Line 4: Payment action mechanism choice trigger buttons */}
+              <div className="space-y-1.5">
+                <span className="text-slate-500 block leading-none text-[10.5px] uppercase tracking-wider select-none font-bold">Hình thức thanh toán</span>
+                <div className="grid grid-cols-3 border border-slate-200 rounded overflow-hidden divide-x divide-slate-200 text-center text-[10px] font-bold h-8 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMode('Kcash')}
+                    className={`flex items-center justify-center gap-1 transition cursor-pointer select-none ${
+                      paymentMode === 'Kcash' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    Tiền mặt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMode('Ktransfer')}
+                    className={`flex items-center justify-center gap-1 transition cursor-pointer select-none ${
+                      paymentMode === 'Ktransfer' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    Chuyển khoản
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMode('Kcard')}
+                    className={`flex items-center justify-center gap-1 transition cursor-pointer select-none ${
+                      paymentMode === 'Kcard' ? 'bg-[#1E3A8A] text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    Thẻ POS
+                  </button>
+                </div>
+              </div>
+
+              {/* Line 5: Exact customer payment input with quick action options */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex justify-between items-center text-slate-600">
+                  <span>Khách thanh toán đưa (đ):</span>
+                  <div className="flex gap-1">
                     <button
                       type="button"
-                      onClick={() => removeFromCart(item.product.maSP)}
-                      className="p-1 text-gray-400 hover:text-red-500 cursor-pointer"
+                      onClick={() => updateActiveTabState({ customerPaid: totalToPay.toString() })}
+                      className="px-1.5 py-0.5 bg-green-50 text-green-700 hover:bg-green-100 border border-green-250 rounded text-[10px] font-bold cursor-pointer"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      Đủ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateActiveTabState({ customerPaid: '0' })}
+                      className="px-1.5 py-0.5 bg-red-50 text-red-700 hover:bg-red-100 border border-red-250 rounded text-[10px] font-bold cursor-pointer"
+                    >
+                      Ghi nợ
                     </button>
                   </div>
                 </div>
-              ))
+
+                <input
+                  type="number"
+                  className="w-full px-3 py-2 border-2 border-slate-300 focus:border-emerald-600 rounded-lg text-center text-sm font-black font-mono text-emerald-800"
+                  placeholder={`Bấm ĐỦ để điền nhanh: ${totalToPay.toLocaleString('vi-VN')} đ`}
+                  value={customerPaid}
+                  onChange={(e) => {
+                    const str = e.target.value;
+                    if (str === '' || parseFloat(str) >= 0) {
+                      updateActiveTabState({ customerPaid: str });
+                    }
+                  }}
+                />
+
+                {/* Line 6: Dynamic grid list of rapid suggested coin/cash elements */}
+                {suggestedCashTotals.length > 0 && totalToPay > 0 && (
+                  <div className="grid grid-cols-3 gap-1 pt-1.5 select-none">
+                    {suggestedCashTotals.map((denom) => {
+                      const isSelected = paidSecAmount === denom;
+                      return (
+                        <button
+                          key={denom}
+                          type="button"
+                          onClick={() => updateActiveTabState({ customerPaid: denom.toString() })}
+                          className={`py-1 text-[10px] font-bold border rounded-md transition cursor-pointer ${
+                            isSelected 
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' 
+                              : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border-slate-200'
+                          }`}
+                        >
+                          {denom.toLocaleString('vi-VN')}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Line 7: Calculating return change and result debts */}
+              <div className="pt-2 border-t border-dashed border-slate-200 space-y-1.5 select-none">
+                {remainingChange > 0 ? (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-600 font-medium">Tiền thừa trả khách:</span>
+                    <strong className="font-mono text-emerald-600 text-sm">{formatVND(remainingChange)}</strong>
+                  </div>
+                ) : null}
+
+                {currentDebtAmount > 0 && currentCustomer.maKH !== 'KH000004' ? (
+                  <div className="flex justify-between items-center text-[10.5px]">
+                    <span className="text-slate-500">Mức nợ mới lưu sổ KH:</span>
+                    <strong className="font-mono text-red-600 text-xs font-black">{formatVND(currentDebtAmount)}</strong>
+                  </div>
+                ) : currentDebtAmount > 0 ? (
+                  <p className="text-[9.5px] text-amber-600 font-bold italic leading-tight">
+                    * Lưu ý: Khách vãng lai không thể ghi công nợ! Vui lòng chọn hoặc thêm khách hàng cụ thể để hoàn tất ghi nợ.
+                  </p>
+                ) : null}
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* Bottom section: checkout triggers */}
+          <div className="pt-4 border-t border-slate-200 space-y-2">
+            
+            {/* Draft Print actions row */}
+            {cart.length > 0 && (
+              <button
+                type="button"
+                onClick={handlePrintTemporary}
+                className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white active:scale-95 text-[10.5px] font-black uppercase tracking-wider rounded-lg flex items-center justify-center gap-1.5 transition duration-150 cursor-pointer shadow-sm"
+              >
+                <Printer className="w-4 h-4" /> In phiếu tạm tính
+              </button>
             )}
-          </div>
-        </div>
 
-        {/* Calculation Summary Panel */}
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 space-y-4">
-          
-          {/* Print Template Configuration Section */}
-          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/60 space-y-2 text-left">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-sans">⚙️ MẪU IN & PHIẾU TẠM</span>
-              <span className="text-[9px] font-bold text-slate-400 bg-slate-200/50 px-1.5 py-0.2 rounded font-sans">Mặc định</span>
-            </div>
-            
-            <div className="space-y-2">
-              <div>
-                <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1">Mẫu thiết kế liên quan</label>
-                <select
-                  id="sales-print-template-select"
-                  className="w-full bg-white border border-slate-300 rounded-lg text-xs py-1.5 px-2 font-semibold text-slate-700 focus:ring-1 focus:ring-rose-500 cursor-pointer outline-none"
-                  value={selectedTemplate}
-                  onChange={(e) => onUpdateTemplate(e.target.value as any)}
-                >
-                  <option value="a5_01">Khổ A5 - Đại diện truyền thống (A5-01)</option>
-                  <option value="a5_02">Khổ A5 - Chi tiết Ngân hàng & MXH (A5-02)</option>
-                  <option value="k58_01">Khổ K58 - Siêu thị nhiệt Barcode (K58-01)</option>
-                  <option value="k58_02">Khổ K58 - Bán lẻ liên hệ (K58-02)</option>
-                  <option value="k80_01">Khổ K80 - Nhiệt chuyên nghiệp (K80-01)</option>
-                </select>
-              </div>
-
-              {cart.length > 0 && (
-                <button
-                  type="button"
-                  id="print-draft-receipt-action"
-                  onClick={handlePrintTemporary}
-                  className="w-full py-2 bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 text-[10px] font-bold uppercase tracking-wider rounded-lg flex items-center justify-center gap-1.5 transition duration-150 cursor-pointer shadow-sm"
-                >
-                  <Printer className="w-3.5 h-3.5" /> In phiếu tạm tính
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Subtotal */}
-          <div className="flex justify-between items-center text-xs text-gray-600">
-            <span>Tiền hàng nguyên gốc:</span>
-            <span className="font-semibold text-gray-950 font-mono">{formatVND(subtotal)}</span>
-          </div>
-
-          {/* Discount Block */}
-          <div className="space-y-1 pb-1.5 border-b border-gray-50">
-            <div className="flex justify-between items-center text-xs text-gray-600">
-              <span>Gợi ý chiết khấu giảm giá:</span>
-              <span className="font-bold text-red-600 font-mono">-{formatVND(discount)}</span>
-            </div>
-            
-            {/* Range slider for discount */}
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min="0"
-                max={Math.min(subtotal, 1000000)}
-                step="5000"
-                className="w-full accent-red-600"
-                value={discount}
-                onChange={(e) => setDiscount(parseInt(e.target.value) || 0)}
-              />
-              <input
-                type="number"
-                step="1000"
-                id="discount-input"
-                className="w-20 px-1 py-0.5 border border-gray-200 text-xs font-mono font-bold text-right rounded"
-                value={discount}
-                onChange={(e) => setDiscount(Math.min(subtotal, Math.max(0, parseInt(e.target.value) || 0)))}
-              />
-            </div>
-          </div>
-
-          {/* NET Pay */}
-          <div className="flex justify-between items-center pt-2">
-            <span className="text-xs font-bold text-gray-900 uppercase">Khách cần thanh toán:</span>
-            <span className="text-lg font-extrabold text-red-600 font-mono">{formatVND(totalToPay)}</span>
-          </div>
-
-          {/* Customer paid portion */}
-          <div className="space-y-1.5 border-t border-dashed border-gray-200 pt-3">
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-gray-700 font-medium">Số tiền khách đã trả (đ):</span>
-              <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={handlePayFully}
-                  className="px-1.5 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded text-[10px] font-bold cursor-pointer"
-                >
-                  Trả hết
-                </button>
-                <button
-                  type="button"
-                  onClick={handlePayZero}
-                  className="px-1.5 py-0.5 bg-red-50 text-red-700 border border-red-200 rounded text-[10px] font-bold cursor-pointer"
-                >
-                  Ghi nợ
-                </button>
-              </div>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={handleCancelSales}
+                className="col-span-1 p-2.5 border border-slate-300 hover:bg-slate-100 rounded-xl text-[10.5px] font-bold text-slate-700 cursor-pointer flex items-center justify-center gap-1 transition"
+                title="Hủy bỏ giỏ hàng"
+              >
+                ✕ Hủy
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleCheckoutInvoice}
+                disabled={cart.length === 0 || (currentDebtAmount > 0 && currentCustomer.maKH === 'KH000004')}
+                className={`col-span-2 py-2.5 rounded-xl font-bold uppercase tracking-wider text-white shadow-md flex items-center justify-center gap-2 select-none transition ${
+                  cart.length === 0 || (currentDebtAmount > 0 && currentCustomer.maKH === 'KH000004')
+                    ? 'bg-slate-300 opacity-60 cursor-not-allowed text-slate-400' 
+                    : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
+                }`}
+              >
+                <Save className="w-4.5 h-4.5" /> THANH TOÁN
+              </button>
             </div>
 
-            <input
-              type="number"
-              id="pos-customer-paid-input"
-              className="w-full px-3 py-2 border border-gray-300 rounded-xl text-center text-sm font-bold font-mono text-emerald-700"
-              placeholder={`Mặc định trả đầy đủ: ${totalToPay.toLocaleString('vi-VN')} đ`}
-              value={customerPaid}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === '' || parseFloat(val) >= 0) {
-                  setCustomerPaid(val);
-                }
-              }}
-            />
-          </div>
-
-          {/* Result Debt */}
-          <div className="flex justify-between items-center text-xs pb-1">
-            <span className="text-gray-700">Công nợ mới ghi nhận:</span>
-            <span className={`font-extrabold font-mono ${remainingDebt > 0 ? 'text-red-600' : 'text-slate-500'}`}>
-              {formatVND(remainingDebt)}
-            </span>
-          </div>
-
-          {/* Primary Buttons panel */}
-          <div className="grid grid-cols-2 gap-2 pt-2">
-            <button
-              type="button"
-              id="cancel-pos-btn"
-              onClick={handleCancelSales}
-              className="p-2.5 border border-gray-300 hover:bg-gray-100 rounded-xl text-xs font-semibold tracking-wide text-gray-700 cursor-pointer flex items-center justify-center gap-1 transition"
-            >
-              <X className="w-4 h-4" /> Bỏ qua / Hủy
-            </button>
-            <button
-              type="button"
-              id="save-checkout-btn"
-              onClick={handleSaveInvoice}
-              disabled={cart.length === 0}
-              className={`p-2.5 rounded-xl text-xs font-bold tracking-wider text-white shadow-sm flex items-center justify-center gap-1.5 transition ${
-                cart.length === 0 
-                  ? 'bg-red-400 opacity-60 cursor-not-allowed' 
-                  : 'bg-red-600 hover:bg-red-700 cursor-pointer animate-pulse'
-              }`}
-            >
-              <Save className="w-4 h-4" /> THANH TOÁN
-            </button>
+            {/* Template selector choice */}
+            <div className="text-[10px] text-slate-400 pt-1 text-center select-none">
+              Mẫu in hiện tại: <strong className="text-slate-600">{selectedTemplate.toUpperCase()}</strong>
+            </div>
           </div>
 
         </div>
 
       </div>
 
-      {/* QUICK ADD CUSTOMER MODAL */}
+      {/* 3. QUICK ADD CUSTOMER MODAL COMPONENT */}
       {showAddCustomer && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4">
           <form 
-            onSubmit={handleAddQuickCustomer}
-            className="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-xl text-left"
+            onSubmit={handleAddQuickCustomerSubmit}
+            className="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl border border-slate-200 text-left"
           >
-            <div className="flex justify-between items-center">
-              <h3 className="font-bold text-gray-900 text-sm">Thêm khách hàng nhanh</h3>
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+              <h3 className="font-black text-slate-800 text-sm uppercase tracking-wide">Thêm khách hàng nhanh tác nghiệp</h3>
               <button 
                 type="button" 
                 onClick={() => setShowAddCustomer(false)}
-                className="p-1 rounded-full hover:bg-gray-100 cursor-pointer"
+                className="p-1 rounded-full hover:bg-slate-100 cursor-pointer text-slate-400 hover:text-slate-700"
               >
-                <X className="w-4 h-4 text-gray-500" />
+                ✕
               </button>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3.5 text-xs text-slate-700">
               <div className="space-y-1">
-                <label className="text-[10px] uppercase font-bold text-gray-500">Họ & tên khách hàng *</label>
+                <label className="text-[10px] uppercase font-bold text-slate-550 block">Họ & tên khách hàng *</label>
                 <input
                   type="text"
                   required
-                  placeholder="Ví dụ: Chị Lan - Hà Đông"
-                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs"
+                  placeholder="Ví dụ: Anh Hoàng - Hà Đông"
+                  className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans"
                   value={newCustName}
                   onChange={(e) => setNewCustName(e.target.value)}
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] uppercase font-bold text-gray-500">Số điện thoại</label>
+                <label className="text-[10px] uppercase font-bold text-slate-550 block">Số điện thoại</label>
                 <input
                   type="text"
-                  placeholder="Ví dụ: 0988777666"
-                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs"
+                  placeholder="Ví dụ: 0988xxxxxx"
+                  className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans"
                   value={newCustPhone}
                   onChange={(e) => setNewCustPhone(e.target.value)}
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] uppercase font-bold text-gray-500">Địa chỉ cụ thể</label>
+                <label className="text-[10px] uppercase font-bold text-slate-550 block">Địa chỉ giao dịch</label>
                 <input
                   type="text"
-                  placeholder="Ví dụ: Xa La, Hà Đông, Hà Nội"
-                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs"
+                  placeholder="Ví dụ: Hà Đông, Hà Nội"
+                  className="w-full px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans"
                   value={newCustAddr}
                   onChange={(e) => setNewCustAddr(e.target.value)}
                 />
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setShowAddCustomer(false)}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
+                className="px-3.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
               >
                 Hủy
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-xs font-bold text-white cursor-pointer"
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs cursor-pointer shadow-sm"
               >
-                Thêm khách
+                Tạo đối tác
               </button>
             </div>
           </form>
