@@ -183,7 +183,7 @@ export default function App() {
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [printedInvoice, setPrintedInvoice] = useState<Invoice | undefined>(undefined);
   const [printedImportSlip, setPrintedImportSlip] = useState<ImportSlip | undefined>(undefined);
-  const [selectedTemplate, setSelectedTemplate] = useState<'a5_01' | 'a5_02' | 'k58_01' | 'k58_02' | 'k80_01'>('a5_01');
+  const [selectedTemplate, setSelectedTemplate] = useState<'a5_01' | 'a5_02' | 'k58_01' | 'k58_02' | 'k80_01' | 'a5_kiotviet'>('a5_01');
   const [isDraftPrint, setIsDraftPrint] = useState(false);
 
   // Quick Header Logo/Title Editing
@@ -1326,7 +1326,7 @@ export default function App() {
               </div>
               <p 
                 id="header-system-title"
-                className="text-slate-400 dark:text-slate-500 text-[9.5px] uppercase font-black tracking-wider mt-1 block font-sans"
+                className="text-slate-400 dark:text-slate-500 text-[9.5px] uppercase font-extrabold tracking-widest mt-1 block font-sans"
               >
                 {settings.systemTitle || 'Chất lượng tạo niềm tin'}
               </p>
@@ -1379,11 +1379,11 @@ export default function App() {
                   setIsQuickActionsOpen(!isQuickActionsOpen);
                   setIsProfileMenuOpen(false);
                 }}
-                className="bg-gradient-to-r from-rose-600/90 to-amber-500/90 hover:from-rose-500 hover:to-amber-400 text-white relative overflow-hidden shadow-[0_3px_10px_rgba(225,29,72,0.25),inset_0_1px_2px_rgba(255,255,255,0.4)] border border-white/20 backdrop-blur px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all hover:scale-[1.03] active:scale-95 duration-150 select-none cursor-pointer group"
+                className="bg-gradient-to-r from-rose-600/90 to-amber-500/90 hover:from-rose-500 hover:to-amber-400 text-white relative overflow-hidden shadow-[0_3px_10px_rgba(225,29,72,0.25),inset_0_1px_2px_rgba(255,255,255,0.4)] border border-white/20 backdrop-blur px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 duration-150 select-none cursor-pointer group"
               >
                 <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-pulse shrink-0" />
                 <span className="tracking-wide text-[11px]">TÁC VỤ NHANH</span>
-                <ChevronDown className={`w-3 h-3 transition-transform duration-150 ${isQuickActionsOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-3 h-3 transition-transform duration-150 ${isQuickActionsOpen ? 'rotate-180' : 'group-hover:rotate-90'}`} />
               </button>
 
               {/* Liquid Glass Dropdown Box */}
@@ -1729,6 +1729,7 @@ export default function App() {
             currentStaffName={activeStaff.tenNV}
             onSaveImportSlip={handleSaveImportSlip}
             onAddNewProduct={handleAddNewProduct}
+            onEditProduct={handleEditProduct}
             onNavigate={(tab) => setActiveTab(tab)}
           />
         )}
@@ -1878,6 +1879,8 @@ export default function App() {
         invoice={printedInvoice}
         importSlip={printedImportSlip}
         settings={settings}
+        products={products}
+        customers={customers}
         selectedTemplate={selectedTemplate}
         onUpdateTemplate={setSelectedTemplate}
         isDraft={isDraftPrint || printedInvoice?.maHD === 'HD-TAMTINH'}

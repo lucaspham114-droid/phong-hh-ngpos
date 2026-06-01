@@ -33,8 +33,8 @@ interface SalesProps {
   currentStaffName: string;
   onSaveInvoice: (newInvoice: Invoice) => void;
   onNavigate: (tab: string) => void;
-  selectedTemplate: 'a5_01' | 'a5_02' | 'k58_01' | 'k58_02' | 'k80_01';
-  onUpdateTemplate: (template: 'a5_01' | 'a5_02' | 'k58_01' | 'k58_02' | 'k80_01') => void;
+  selectedTemplate: 'a5_01' | 'a5_02' | 'k58_01' | 'k58_02' | 'k80_01' | 'a5_kiotviet';
+  onUpdateTemplate: (template: 'a5_01' | 'a5_02' | 'k58_01' | 'k58_02' | 'k80_01' | 'a5_kiotviet') => void;
   onPrintDraft?: (draftInvoice: Invoice) => void;
 }
 

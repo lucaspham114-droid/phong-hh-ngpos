@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { 
   Search, 
   Truck, 
@@ -27,6 +28,30 @@ import {
 import { Product, Supplier, ImportSlip, ImportSlipDetail, InventoryItem, SystemSettings } from '../types';
 import { formatVND, smartMatch, generateId } from '../utils';
 
+const mapHeaderValue = (h: string) => {
+  const clean = h.trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd');
+
+  if (clean === 'mahang' || clean === 'ma sp' || clean === 'masp' || clean === 'ma hang' || clean === 'ma') return 'maSP';
+  if (clean === 'tenhang' || clean === 'ten sp' || clean === 'tensp' || clean === 'ten hang' || clean === 'ten') return 'tenSP';
+  if (clean === 'nhomhang' || clean === 'nhom hang' || clean === 'nhom') return 'nhomHang';
+  if (clean === 'donvitinh' || clean === 'dvt' || clean === 'don vi' || clean === 'donvitinh') return 'dvt';
+  if (clean === 'mavach' || clean === 'ma vach' || clean === 'barcode') return 'maVach';
+  if (clean === 'giavon' || clean === 'gia von' || clean === 'costprice' || clean === 'gia von nhap' || clean === 'gianhap') return 'costPrice';
+  if (clean === 'giaban' || clean === 'gia ban' || clean === 'retailprice' || clean === 'gia niem yet ban le') return 'salePrice';
+  if (clean === 'tondau' || clean === 'ton dau' || clean === 'ton' || clean === 'tonkho') return 'tonDau';
+  if (clean === 'tontoithieu' || clean === 'ton toi thieu') return 'tonToiThieu';
+  if (clean === 'tukhoa' || clean === 'tu khoa' || clean === 'keywords') return 'tuKhoa';
+  if (clean === 'soluong' || clean === 'so luong' || clean === 'soluongnhap' || clean === 'so luong nhap') return 'quantity';
+  if (clean === 'gianhap' || clean === 'gia nhap') return 'costPrice';
+  if (clean === 'giabanmoi' || clean === 'gia ban moi' || clean === 'giabanmoi' || clean === 'gia ban moi') return 'salePriceNew';
+  if (clean === 'ghichu' || clean === 'ghi chu') return 'note';
+  return null;
+};
+
 interface ImportsProps {
   products: Product[];
   suppliers: Supplier[];
@@ -35,6 +60,7 @@ interface ImportsProps {
   currentStaffName: string;
   onSaveImportSlip: (newSlip: ImportSlip) => void;
   onAddNewProduct: (newProduct: Product, initialQty: number) => void;
+  onEditProduct: (updatedProduct: Product) => void;
   onNavigate: (tab: string) => void;
 }
 
@@ -46,6 +72,7 @@ export default function Imports({
   currentStaffName,
   onSaveImportSlip,
   onAddNewProduct,
+  onEditProduct,
   onNavigate
 }: ImportsProps) {
   // Search state for product
@@ -107,6 +134,14 @@ export default function Imports({
   const [excelUpdateStock, setExcelUpdateStock] = useState<boolean>(false);
   const [excelUpdateCostPrice, setExcelUpdateCostPrice] = useState<boolean>(true);
   const [excelUpdateDesc, setExcelUpdateDesc] = useState<boolean>(false);
+
+  // Brand new interactive Excel/CSV state attributes
+  const [excelImportType, setExcelImportType] = useState<'products' | 'purchase'>('products');
+  const [excelInputText, setExcelInputText] = useState('');
+  const [excelFileName, setExcelFileName] = useState('');
+  const [excelRows, setExcelRows] = useState<any[]>([]);
+  const [excelShowPreview, setExcelShowPreview] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'valid' | 'invalid'>('all');
 
   // Hotkey register
   useEffect(() => {
@@ -309,123 +344,421 @@ export default function Imports({
     setShowAddProductModal(false);
   };
 
-  // Launch mock Excel File process (Screenshot 5, 8 & 9)
-  const triggerExcelFileSelect = () => {
+  // Interactive Excel / CSV Import & Validation engine
+  const triggerExcelFileSelect = (type: 'products' | 'purchase') => {
+    setExcelImportType(type);
+    setExcelInputText('');
+    setExcelFileName('');
+    setExcelRows([]);
+    setExcelShowPreview(false);
     setShowExcelWizard(true);
   };
 
-  const handleFinishExcelImport = () => {
-    // Inject mock KiotViet system goods as shown in screenshots
-    const sampleItems = [
-      {
-        maSP: '1021022915952',
-        tenSP: 'Sữa đặc có đường Ông Thọ trắng nhãn vàng lon 380g',
-        nhomHang: 'Sữa học đường',
-        dvt: 'Lon',
-        maVach: '1021022915952',
-        giaNhap: 22000,
-        giaBan: 28000,
-        tuKhoa: 'sua ong tho dac sua'
-      },
-      {
-        maSP: '10131420895',
-        tenSP: 'Vít dầu bằng răng thưa, thân ốm M4, màu đen-VG420B23T',
-        nhomHang: 'Ốc vít kim khí',
-        dvt: 'Hộp',
-        maVach: '10131420895',
-        giaNhap: 15000,
-        giaBan: 20000,
-        tuKhoa: 'vit dau oc kim khi'
-      },
-      {
-        maSP: '10135603877',
-        tenSP: 'P/S kem đánh răng trà xanh 180g/36 ống',
-        nhomHang: 'Hóa mỹ phẩm',
-        dvt: 'Ống',
-        maVach: '10135603877',
-        giaNhap: 35000,
-        giaBan: 46000,
-        tuKhoa: 'ps kem danh rang tra xanh'
-      }
-    ];
+  // Downloads structured template format for client
+  const handleDownloadTemplate = (type: 'products' | 'purchase') => {
+    let csvContent = "";
+    if (type === 'products') {
+      csvContent = "Mã hàng,Tên hàng,Nhóm hàng,Đơn vị tính,Giá vốn,Giá bán,Tồn đầu,Tồn tối thiểu,Từ khóa tìm kiếm\n" +
+                   "SP0001,Nồi inox 24cm,Nồi,Cái,90000,150000,20,5,noi inox\n" +
+                   "SP0002,Chảo chống dính 28cm,Chảo,Cái,70000,120000,15,4,chao chong dinh\n" +
+                   "SP0003,Ấm siêu tốc 1.8L,Điện gia dụng,Cái,110000,180000,10,3,am sieu toc\n";
+    } else {
+      csvContent = "Mã hàng,Tên hàng,Đơn vị tính,Số lượng nhập,Giá nhập,Giá bán mới,Ghi chú\n" +
+                   "SP0001,Nồi inox 24cm,Cái,10,90000,150000,Nhập hàng đợt 1\n" +
+                   "SP0002,Chảo chống dính 28cm,Cái,20,70000,,Nhập bổ sung\n" +
+                   "SP0003,Ấm siêu tốc 1.8L,Cái,5,110000,180000,Khách đặt trước\n";
+    }
+    
+    // Add BOM for UTF-8 in Excel
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", type === 'products' ? "mau_danh_muc_san_pham.csv" : "mau_phieu_nhap_hang.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
-    // Bulk register products to memory database
-    sampleItems.forEach(item => {
-      const match = products.find(p => p.maSP === item.maSP);
-      if (!match) {
-        onAddNewProduct({
-          maSP: item.maSP,
-          tenSP: item.tenSP,
-          nhomHang: item.nhomHang,
-          dvt: item.dvt,
-          maVach: item.maVach,
-          giaNhap: item.giaNhap,
-          giaBan: item.giaBan,
-          tuKhoa: item.tuKhoa,
-          trangThai: 'Bán'
-        }, 0);
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'products' | 'purchase') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setExcelFileName(file.name);
+    
+    const reader = new FileReader();
+    const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xlsm') || file.name.endsWith('.xls');
+
+    if (isExcel) {
+      reader.onload = (event) => {
+        try {
+          const data = new Uint8Array(event.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
+          if (rawRows.length === 0) {
+            alert("File Excel này không chứa dữ liệu!");
+            return;
+          }
+          
+          const firstLine: any[] = rawRows[0] || [];
+          const headersMapped = firstLine.map(h => mapHeaderValue(String(h || '')));
+
+          const parsedRows = rawRows.slice(1).map((rowArr: any[]) => {
+            const item: any = {};
+            headersMapped.forEach((mappedHeader, i) => {
+              if (mappedHeader) {
+                const val = rowArr[i];
+                item[mappedHeader] = val !== undefined && val !== null ? String(val).trim() : '';
+              }
+            });
+            return item;
+          }).filter((item: any) => Object.values(item).some(val => String(val).trim().length > 0));
+
+          setExcelInputText(`Đã nạp thành công từ tệp Excel: ${file.name}`);
+          processParsedContent(parsedRows, type);
+        } catch (err) {
+          console.error("Lỗi đọc file Excel:", err);
+          alert("Có lỗi xảy ra khi giải mã file Excel. Hãy chắc chắn đó là file hợp lệ!");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        if (text) {
+          setExcelInputText(text);
+          processParsedContent(text, type);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const handleLoadDemoData = (type: 'products' | 'purchase') => {
+    let demoText = "";
+    if (type === 'products') {
+      demoText = "Mã hàng,Tên hàng,Nhóm hàng,Đơn vị tính,Giá vốn,Giá bán,Tồn đầu,Tồn tối thiểu,Từ khóa tìm kiếm\n" +
+                 "SP0001,Nồi inox 24cm,Nồi,Cái,90000,150000,20,5,noi inox\n" +
+                 "SP0002,Chảo chống dính 28cm,Chảo,Cái,70000,120000,15,4,chao chong dinh\n" +
+                 "SP0003,Ấm siêu tốc 1.8L,Điện gia dụng,Cái,110000,180000,10,3,am sieu toc\n" +
+                 ",Sản phẩm thiếu mã,Khác,Hộp,12000,20000,,,thieu ma sp\n" + 
+                 "SP0002,Chảo inox 28cm cao cấp,Chảo,Cái,80000,130000,15,4,bi trung ma nhung khac ten\n" + 
+                 "SP0010,,Thiết bị,Cái,50000,90000,10,3,thieu ten sp\n"; 
+    } else {
+      demoText = "Mã hàng,Tên hàng,Đơn vị tính,Số lượng nhập,Giá nhập,Giá bán mới,Ghi chú\n" +
+                 "SP0001,Nồi inox 24cm,Cái,10,90000,150000,Nhập đợt 1\n" +
+                 "SP0002,Chảo chống dính 28cm,Cái,20,70000,120000,Giao nhanh\n" +
+                 "SP0100,Sản phẩm chưa đăng ký,Cái,5,100000,140000,Sẽ tự động khai sinh\n" + 
+                 "SP0001,Nồi inox 24cm,Cái,-5,90000,,Sai số lượng\n" + 
+                 "SP0002,Chảo chống dính 28cm,Cái,15,-70000,120000,Sai giá nhập\n"; 
+    }
+    setExcelInputText(demoText);
+    processParsedContent(demoText, type);
+  };
+
+  const parseContentText = (text: string) => {
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(line => line.length > 0);
+    if (lines.length === 0) return { headers: [], rows: [] };
+
+    const firstLine = lines[0];
+    let delimiter = ',';
+    if (firstLine.includes('\t')) delimiter = '\t';
+    else if (firstLine.includes(';')) delimiter = ';';
+
+    const rawHeaders = firstLine.split(delimiter).map(h => h.trim().toLowerCase());
+
+    function splitCSVLine(txt: string, delim: string): string[] {
+      if (delim === '\t' || delim === ';') {
+        return txt.split(delim);
       }
+      const result: string[] = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < txt.length; i++) {
+        const c = txt[i];
+        if (c === '"') {
+          inQuotes = !inQuotes;
+        } else if (c === delim && !inQuotes) {
+          result.push(cur);
+          cur = '';
+        } else {
+          cur += c;
+        }
+      }
+      result.push(cur);
+      return result;
+    }
+
+    const headersMapped = rawHeaders.map(h => mapHeaderValue(h));
+
+    const rows = lines.slice(1).map((line) => {
+      const rawValues = splitCSVLine(line, delimiter);
+      const item: any = {};
+      headersMapped.forEach((mappedHeader, i) => {
+        if (mappedHeader) {
+          item[mappedHeader] = rawValues[i] ? rawValues[i].trim() : '';
+        }
+      });
+      return item;
     });
 
-    // Populate the Cart with mock transaction elements mimicking Screenshot 4
-    setImportCart([
-      {
-        product: {
-          maSP: sampleItems[0].maSP,
-          tenSP: sampleItems[0].tenSP,
-          nhomHang: sampleItems[0].nhomHang,
-          dvt: sampleItems[0].dvt,
-          maVach: sampleItems[0].maVach,
-          giaNhap: sampleItems[0].giaNhap,
-          giaBan: sampleItems[0].giaBan,
-          tuKhoa: sampleItems[0].tuKhoa,
-          trangThai: 'Bán'
-        },
-        quantity: 24,
-        costPrice: 22000,
-        discount: 0,
-        note: '',
-        isEditingNote: false
-      },
-      {
-        product: {
-          maSP: sampleItems[1].maSP,
-          tenSP: sampleItems[1].tenSP,
-          nhomHang: sampleItems[1].nhomHang,
-          dvt: sampleItems[1].dvt,
-          maVach: sampleItems[1].maVach,
-          giaNhap: sampleItems[1].giaNhap,
-          giaBan: sampleItems[1].giaBan,
-          tuKhoa: sampleItems[1].tuKhoa,
-          trangThai: 'Bán'
-        },
-        quantity: 100,
-        costPrice: 15000,
-        discount: 0,
-        note: '',
-        isEditingNote: false
-      },
-      {
-        product: {
-          maSP: sampleItems[2].maSP,
-          tenSP: sampleItems[2].tenSP,
-          nhomHang: sampleItems[2].nhomHang,
-          dvt: sampleItems[2].dvt,
-          maVach: sampleItems[2].maVach,
-          giaNhap: sampleItems[2].giaNhap,
-          giaBan: sampleItems[2].giaBan,
-          tuKhoa: sampleItems[2].tuKhoa,
-          trangThai: 'Bán'
-        },
-        quantity: 36,
-        costPrice: 35000,
-        discount: 0,
-        note: '',
-        isEditingNote: false
+    return { headers: headersMapped, rows };
+  };
+
+  const processParsedContent = (input: string | any[], type: 'products' | 'purchase') => {
+    let parsedRaw: any[] = [];
+    if (typeof input === 'string') {
+      if (!input.trim()) {
+        setExcelRows([]);
+        return;
       }
-    ]);
+      parsedRaw = parseContentText(input).rows;
+    } else if (Array.isArray(input)) {
+      parsedRaw = input;
+    }
+    
+    // Validate rows
+    const validated = parsedRaw.map((r, idx) => {
+      const lineNum = idx + 2;
+      const maSP = (r.maSP || "").trim();
+      const tenSP = (r.tenSP || "").trim();
+      const dvt = (r.dvt || "Cái").trim();
+      const nhomHang = (r.nhomHang || "Điện gia dụng").trim();
+      
+      const quantity = Math.max(-999999, parseInt(r.quantity) || 0);
+      const costPrice = Math.max(-999999, parseFloat(r.costPrice) || 0);
+      const salePrice = Math.max(0, parseFloat(r.salePrice) || 0);
+      const salePriceNew = r.salePriceNew ? Math.max(0, parseFloat(r.salePriceNew)) : undefined;
+      const note = (r.note || "").trim();
+      const tuKhoa = (r.tuKhoa || "").trim();
+      const tonDau = Math.max(0, parseInt(r.tonDau) || 0);
+      const tonToiThieu = Math.max(0, parseInt(r.tonToiThieu) || 5);
+
+      const existingProd = products.find(p => p.maSP === maSP);
+
+      let status: 'valid' | 'invalid' = 'valid';
+      let detail = 'Hợp lệ';
+      let actionType: 'create' | 'update' | 'skip' | 'error' = 'create';
+
+      if (type === 'products') {
+        if (!tenSP) {
+          status = 'invalid';
+          detail = 'Thiếu tên sản phẩm (Tên hàng hóa là bắt buộc)';
+          actionType = 'error';
+        } else if (existingProd) {
+          // Conflict checking
+          if (existingProd.tenSP !== tenSP && excelConflictResult === 'error') {
+            status = 'invalid';
+            detail = `Trùng mã hàng nhưng khác tên gốc: "${existingProd.tenSP}"`;
+            actionType = 'error';
+          } else {
+            detail = `Trùng mã - Sẽ cập nhật sản phẩm cũ`;
+            actionType = 'update';
+          }
+        } else {
+          detail = `Mã mới - Sẽ tạo mới danh mục sản phẩm`;
+          actionType = 'create';
+        }
+      } else {
+        // Purchase slip validation
+        if (!maSP) {
+          status = 'invalid';
+          detail = 'Chưa có mã hàng (Thiếu MaHang)';
+          actionType = 'error';
+        } else if (!existingProd) {
+          if (excelUpdateStock) {
+            detail = `Chưa có mã - Sẽ tự khai sinh sản phẩm mới: "${tenSP || 'Hàng mới tự tạo'}"`;
+            actionType = 'create';
+          } else {
+            status = 'invalid';
+            detail = `Mã hàng không tồn tại trong hệ thống (Hãy bật "Tự tạo sản phẩm")`;
+            actionType = 'error';
+          }
+        } else {
+          // Match
+          if (existingProd.tenSP !== tenSP && excelConflictResult === 'error') {
+            status = 'invalid';
+            detail = `Mã trùng nhưng khác tên trên app: "${existingProd.tenSP}"`;
+            actionType = 'error';
+          } else {
+            detail = `Hợp lệ - Khớp hàng hóa sẵn có`;
+            actionType = 'update';
+          }
+        }
+
+        // Check quantity or price validation
+        if (status === 'valid') {
+          if (quantity <= 0) {
+            status = 'invalid';
+            detail = `Số lượng nhập phải lớn hơn 0 (Đang ghi nhận: ${quantity})`;
+            actionType = 'error';
+          } else if (costPrice < 0) {
+            status = 'invalid';
+            detail = 'Giá nhập không được nhỏ hơn 0';
+            actionType = 'error';
+          }
+        }
+      }
+
+      return {
+        _lineNum: lineNum,
+        maSP: maSP || (type === 'products' ? `SP_AUTO_${Date.now().toString().slice(-4)}_${idx}` : ''),
+        tenSP: tenSP || (existingProd ? existingProd.tenSP : ''),
+        dvt,
+        nhomHang,
+        quantity,
+        costPrice: costPrice > 0 ? costPrice : (existingProd ? existingProd.giaNhap || 0 : 0),
+        salePrice: salePrice > 0 ? salePrice : (existingProd ? existingProd.giaBan || 0 : 0),
+        salePriceNew,
+        note,
+        tuKhoa,
+        tonDau,
+        tonToiThieu,
+        status,
+        detail,
+        actionType
+      };
+    });
+
+    setExcelRows(validated);
+  };
+
+  const handleDownloadErrorsCSV = () => {
+    const errorRows = excelRows.filter(r => r.status === 'invalid');
+    if (errorRows.length === 0) {
+      alert("Tuyệt vời! Không có dòng lỗi nào trong bảng kiểm tra của bạn.");
+      return;
+    }
+
+    let csvContent = "Dong,MaHang,TenHang,LoiChiTiet\n";
+    errorRows.forEach(r => {
+      csvContent += `${r._lineNum},${r.maSP},${r.tenSP},"${r.detail.replace(/"/g, '""')}"\n`;
+    });
+
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `loi_import_${excelImportType}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExecuteImport = () => {
+    const validRows = excelRows.filter(r => r.status === 'valid');
+    if (validRows.length === 0) {
+      alert("Không tìm thấy dòng hợp lệ để thực thi! Vui lòng kiểm tra lại cấu trúc file nạp.");
+      return;
+    }
+
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    if (excelImportType === 'products') {
+      // Create/Update general catalog items
+      validRows.forEach(r => {
+        const existing = products.find(p => p.maSP === r.maSP || p.maSP === r.maSP.toUpperCase());
+        if (existing) {
+          const updatedProduct: Product = {
+            ...existing,
+            tenSP: excelConflictResult === 'replace' ? r.tenSP : existing.tenSP,
+            giaNhap: excelUpdateCostPrice ? r.costPrice : existing.giaNhap,
+            giaBan: r.salePrice || existing.giaBan,
+            dvt: r.dvt || existing.dvt,
+            nhomHang: r.nhomHang || existing.nhomHang
+          };
+          onEditProduct(updatedProduct);
+          updatedCount++;
+        } else {
+          const searchKeywords = `${r.tenSP.toLowerCase()} ${r.nhomHang.toLowerCase()} ${r.maSP.toLowerCase()}`;
+          const newProduct: Product = {
+            maSP: r.maSP,
+            tenSP: r.tenSP,
+            nhomHang: r.nhomHang,
+            dvt: r.dvt,
+            maVach: r.maSP,
+            tuKhoa: searchKeywords,
+            giaNhap: r.costPrice,
+            giaBan: r.salePrice,
+            trangThai: 'Bán'
+          };
+          onAddNewProduct(newProduct, r.tonDau);
+          createdCount++;
+        }
+      });
+
+      alert(`Đã hoàn tất import danh mục hàng hóa!\n- Khởi tạo mới: ${createdCount} sản phẩm\n- Cập nhật ghi đè: ${updatedCount} sản phẩm`);
+    } else {
+      // Slip purchase items
+      const cartItemsToAppend: any[] = [];
+
+      validRows.forEach(r => {
+        let matchedProd = products.find(p => p.maSP === r.maSP);
+        
+        if (!matchedProd) {
+          // Auto create product on-the-fly
+          const searchKeywords = `${r.tenSP.toLowerCase()} ${r.maSP.toLowerCase()}`;
+          matchedProd = {
+            maSP: r.maSP,
+            tenSP: r.tenSP || 'Hàng tự tạo',
+            nhomHang: 'Điện gia dụng',
+            dvt: r.dvt || 'Cái',
+            maVach: r.maSP,
+            tuKhoa: searchKeywords,
+            giaNhap: r.costPrice,
+            giaBan: r.salePriceNew || r.costPrice * 1.45,
+            trangThai: 'Bán'
+          };
+          onAddNewProduct(matchedProd, 0);
+          createdCount++;
+        } else if (excelUpdateCostPrice || r.salePriceNew) {
+          const updatedProduct: Product = {
+            ...matchedProd,
+            giaNhap: excelUpdateCostPrice ? r.costPrice : matchedProd.giaNhap,
+            giaBan: r.salePriceNew || matchedProd.giaBan
+          };
+          onEditProduct(updatedProduct);
+          matchedProd = updatedProduct;
+          updatedCount++;
+        }
+
+        cartItemsToAppend.push({
+          product: matchedProd,
+          quantity: r.quantity,
+          costPrice: r.costPrice,
+          discount: 0,
+          note: r.note || '',
+          isEditingNote: false
+        });
+      });
+
+      // Pushes items into the active cart list
+      setImportCart(prev => {
+        const updatedCart = [...prev];
+        cartItemsToAppend.forEach(appendItem => {
+          const idx = updatedCart.findIndex(item => item.product.maSP === appendItem.product.maSP);
+          if (idx !== -1) {
+            updatedCart[idx] = {
+              ...updatedCart[idx],
+              quantity: updatedCart[idx].quantity + appendItem.quantity,
+              costPrice: appendItem.costPrice,
+              note: appendItem.note || updatedCart[idx].note
+            };
+          } else {
+            updatedCart.push(appendItem);
+          }
+        });
+        return updatedCart;
+      });
+
+      alert(`Khởi tạo phiếu thành công! Thêm ${cartItemsToAppend.length} sản phẩm từ file Excel vào giỏ hàng phiếu nhập.`);
+    }
 
     setShowExcelWizard(false);
+    setExcelShowPreview(false);
   };
 
   // Process checkout slip
@@ -632,6 +965,28 @@ export default function Imports({
 
         {/* Right buttons control standard layout representation */}
         <div className="flex items-center gap-1 bg-emerald-700 dark:bg-slate-800 p-0.5 rounded-lg shrink-0 w-full md:w-auto justify-center">
+          <button 
+            type="button" 
+            onClick={() => triggerExcelFileSelect('products')}
+            className="p-1 px-2.5 hover:bg-emerald-800 dark:hover:bg-slate-700 rounded-md transition text-emerald-100 hover:text-white cursor-pointer font-bold text-[10.5px] flex items-center gap-1" 
+            title="Import danh mục sản phẩm Excel"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-250" />
+            <span className="hidden xl:inline">Nhập từ mẫu SP</span>
+          </button>
+          
+          <button 
+            type="button" 
+            onClick={() => triggerExcelFileSelect('purchase')}
+            className="p-1 px-2.5 hover:bg-emerald-800 dark:hover:bg-slate-700 rounded-md transition text-blue-100 hover:text-white cursor-pointer font-bold text-[10.5px] flex items-center gap-1 border-l border-emerald-500/35" 
+            title="Import phiếu nhập hàng Excel"
+          >
+            <Upload className="w-4 h-4 text-blue-200" />
+            <span className="hidden xl:inline">Nhập phiếu hàng</span>
+          </button>
+
+          <span className="w-[1px] h-4 bg-emerald-550/40 dark:bg-slate-700 mx-1"></span>
+
           <button type="button" className="p-1 px-3 hover:bg-emerald-800 dark:hover:bg-slate-700 rounded-md transition text-slate-200 hover:text-white cursor-pointer" title="Cấu hình quét">
             <Barcode className="w-5 h-5 text-white" />
           </button>
@@ -688,31 +1043,47 @@ export default function Imports({
                   </p>
                   
                   {/* Underlined file template text as Screenshot 1 */}
-                  <div className="pt-2 text-xs">
-                    <span className="text-slate-500">Tải về dữ liệu mẫu: </span>
-                    <a
-                      href="#download-sample-excel"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        alert("Bản mẫu Excel 'PhongHung_KiotImports_Template.xlsx' đang tải về hệ thống...");
-                      }}
+                  <div className="pt-2 text-xs flex justify-center gap-4">
+                    <span className="text-slate-500">Tải dữ liệu mẫu:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTemplate('products')}
+                      className="text-emerald-600 dark:text-emerald-400 font-extrabold hover:underline"
+                    >
+                      📁 Mẫu Danh mục SP
+                    </button>
+                    <span className="text-slate-350">|</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadTemplate('purchase')}
                       className="text-blue-600 dark:text-blue-400 font-extrabold hover:underline"
                     >
-                      Excel file
-                    </a>
+                      🧾 Mẫu Phiếu Nhập
+                    </button>
                   </div>
                 </div>
 
-                {/* Big Blue Button representing "Chọn file dữ liệu" in Screen 1 */}
-                <button
-                  type="button"
-                  id="excel-select-trigger-btn"
-                  onClick={triggerExcelFileSelect}
-                  className="mx-auto px-6 py-3 bg-[#0066FF] hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-md hover:shadow-lg transition-transform hover:scale-[1.03] active:scale-95 duration-150 flex items-center justify-center gap-2 cursor-pointer border border-blue-600"
-                >
-                  <Upload className="w-4 h-4 text-white" />
-                  CHỌN FILE DỮ LIỆU
-                </button>
+                {/* Split control action buttons mirroring KiotViet custom wizard */}
+                <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center max-w-sm mx-auto">
+                  <button
+                    type="button"
+                    onClick={() => triggerExcelFileSelect('products')}
+                    className="flex-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md hover:shadow-lg transition-all transform hover:scale-[1.03] active:scale-95 flex items-center justify-center gap-2 cursor-pointer border border-emerald-700 uppercase"
+                  >
+                    <Upload className="w-4 h-4 text-white" />
+                    Import danh mục SP
+                  </button>
+
+                  <button
+                    type="button"
+                    id="excel-select-trigger-btn"
+                    onClick={() => triggerExcelFileSelect('purchase')}
+                    className="flex-1 px-4 py-3 bg-[#0066FF] hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-md hover:shadow-lg transition-all transform hover:scale-[1.03] active:scale-95 flex items-center justify-center gap-2 cursor-pointer border border-blue-600 uppercase"
+                  >
+                    <Upload className="w-4 h-4 text-white" />
+                    Import phiếu nhập hàng
+                  </button>
+                </div>
 
               </div>
 
@@ -1521,199 +1892,516 @@ export default function Imports({
       )}
 
       {/* ========================================================= */}
-      {/* SCREENSHOT 9: DYNAMIC EXCEL FILE IMPORT CONTROL PANEL */}
+      {/* SCREENSHOT 9 & USER DEFINED EXCEL IMPORT CONTROL PANEL CONTAINER */}
       {/* ========================================================= */}
       {showExcelWizard && (
         <div className="fixed inset-0 z-[100] bg-slate-900/65 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-200 text-left">
           
-          <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden text-slate-800">
+          <div className="bg-white dark:bg-slate-950 rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden text-slate-800 dark:text-white border border-slate-200 dark:border-slate-800">
             
             {/* Header segment of excel wizard */}
-            <div className="bg-white border-b border-slate-200 p-4 shrink-0 flex items-center justify-between select-none">
-              <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5 uppercase tracking-wide">
-                Nhập hàng hóa từ file dữ liệu 
-                <span className="text-slate-400 font-normal lowercase">
-                  (Tải về file mẫu: <span className="text-blue-600 underline font-bold cursor-pointer">Excel file</span>)
-                </span>
-              </h3>
+            <div className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-4 shrink-0 flex items-center justify-between select-none">
+              <div className="space-y-1">
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-sm flex items-center gap-1.5 uppercase tracking-wide">
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  HỆ THỐNG NHẬP DỮ LIỆU EXCEL / CSV CHUYÊN NGHIỆP
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Tải file mẫu, điền hóa đơn vật tư và thực hiện kiểm tra kiểm thái lỗi trực diện.
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowExcelWizard(false)}
-                className="p-1 rounded-full text-slate-400 hover:text-slate-750 transition"
+                onClick={() => {
+                  setShowExcelWizard(false);
+                  setExcelShowPreview(false);
+                }}
+                className="p-1 px-1.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white font-extrabold cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Body matching Screenshot 9 options */}
-            <div className="p-6 overflow-y-auto space-y-5 text-sm">
+            {/* Dynamic Segment: Main Steps */}
+            <div className="flex-1 overflow-y-auto p-5 md:p-6 space-y-5">
               
-              {/* Question 1: Trùng mã hàng/mã vạch, khác tên */}
-              <div className="space-y-2 border-b border-slate-100 pb-3">
-                <span className="font-extrabold text-[#1F2937] text-xs uppercase block tracking-wider">
-                  Xử lý <strong className="italic text-rose-600">trùng</strong> mã hàng/mã vạch, <strong className="italic text-rose-600">khác</strong> tên hàng hóa?
-                </span>
-                <div className="space-y-1.5 pl-2 text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="conflict-mami"
-                      className="w-4 h-4 text-blue-600"
-                      checked={excelConflictResult === 'error'}
-                      onChange={() => setExcelConflictResult('error')}
-                    />
-                    <span>Báo lỗi và dừng import</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="conflict-mami"
-                      className="w-4 h-4 text-blue-600"
-                      checked={excelConflictResult === 'replace'}
-                      onChange={() => setExcelConflictResult('replace')}
-                    />
-                    <span>Thay thế tên hàng cũ bằng tên hàng mới</span>
-                  </label>
+              {/* Type Selector (Import Mode) & Sample Download block shortened */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-100/70 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/80 p-3 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">Chế độ nhập:</span>
+                  {excelImportType === 'products' ? (
+                    <div className="flex items-center gap-2">
+                      <span className="bg-emerald-100 text-emerald-850 dark:bg-emerald-950/40 dark:text-emerald-400 px-2.5 py-1 rounded-lg text-xs font-black uppercase border border-emerald-200 dark:border-emerald-900/60 flex items-center gap-1.5">
+                        📁 Danh mục sản phẩm
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExcelImportType('purchase');
+                          setExcelInputText('');
+                          setExcelRows([]);
+                          setExcelShowPreview(false);
+                        }}
+                        className="text-[11px] font-bold text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer transition"
+                      >
+                        (Đổi sang Phiếu nhập)
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-400 px-2.5 py-1 rounded-lg text-xs font-black uppercase border border-blue-200 dark:border-blue-900/60 flex items-center gap-1.5">
+                        🧾 Phiếu nhập hàng
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExcelImportType('products');
+                          setExcelInputText('');
+                          setExcelRows([]);
+                          setExcelShowPreview(false);
+                        }}
+                        className="text-[11px] font-bold text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline cursor-pointer transition"
+                      >
+                        (Đổi sang Danh mục SP)
+                      </button>
+                    </div>
+                  )}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleDownloadTemplate(excelImportType)}
+                  className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-lg transition flex items-center gap-1 border border-slate-300 dark:border-slate-700 font-sans cursor-pointer"
+                >
+                  📥 Tải file mẫu ({excelImportType === 'products' ? 'Danh mục' : 'Hóa đơn'})
+                </button>
               </div>
 
-              {/* Question 2: Trùng mã vạch, khác mã hàng */}
-              <div className="space-y-2 border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-1">
-                  <span className="font-extrabold text-[#1F2937] text-xs uppercase tracking-wider">
-                    Xử lý trùng mã vạch, khác mã hàng?
-                  </span>
-                  <HelpCircle className="w-3.5 h-3.5 text-slate-400 cursor-help" title="Lựa chọn cách thức máy xử lý nếu phát hiện cùng một mã vạch định danh tồn tại ở nhiều mã hàng gia dụng khác nhau trong tờ khai Excel." />
-                </div>
-                <div className="space-y-1.5 pl-2 text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="conflict-barcode"
-                      className="w-4 h-4 text-blue-600"
-                      checked={excelConflictBarcode === 'error'}
-                      onChange={() => setExcelConflictBarcode('error')}
-                    />
-                    <span>Báo lỗi và dừng import</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="conflict-barcode"
-                      className="w-4 h-4 text-blue-600"
-                      checked={excelConflictBarcode === 'replace'}
-                      onChange={() => setExcelConflictBarcode('replace')}
-                    />
-                    <span>Thay thế mã hàng cũ bằng mã hàng mới</span>
-                  </label>
-                </div>
-              </div>
+              {!excelShowPreview ? (
+                /* Step INPUT: Upload & Settings Segment */
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 leading-relaxed">
+                  
+                  {/* Left: Raw file uploading interface */}
+                  <div className="space-y-4 animate-in fade-in duration-300">
+                    <div className="space-y-2">
+                      <span className="font-extrabold text-[#1F2937] dark:text-slate-150 text-xs uppercase block tracking-wider">
+                        Nạp tệp Excel (.xlsx, .xlsm, .xls) hoặc file CSV (Google Trang Tính,...)
+                      </span>
+                      <div className="border-2 border-dashed border-slate-300 dark:border-slate-850 p-8 rounded-xl text-center bg-slate-50/50 dark:bg-slate-905/30 hover:bg-slate-50 cursor-pointer transition relative">
+                        <Upload className="w-10 h-10 mx-auto text-emerald-500 mb-3" />
+                        <span className="text-xs font-extrabold text-slate-700 dark:text-slate-300 block mb-1">
+                          {excelFileName ? `Đã chọn: ${excelFileName}` : "Kéo thả hoặc nhấp vào đây để tải file lên"}
+                        </span>
+                        <span className="text-[11px] text-slate-400 block">
+                          Định dạng hỗ trợ: .xlsx, .xlsm, .xls, .csv từ Google Sheets & Microsoft Excel
+                        </span>
+                        <input
+                          type="file"
+                          accept=".xlsx,.xlsm,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                          onChange={(e) => handleFileUpload(e, excelImportType)}
+                          className="absolute inset-0 opacity-0 cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  </div>
 
-              {/* Question 3: Cập nhật tồn kho? */}
-              <div className="space-y-2 border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-1 text-xs">
-                  <span className="font-extrabold text-[#1F2937] uppercase tracking-wider">Cập nhật tồn kho?</span>
-                  <HelpCircle className="w-3.5 h-3.5 text-slate-400 cursor-help" title="Cho phép hệ thống ghi đè cộng dồn số tồn sẵn có và số tồn trong file excel nạp." />
-                </div>
-                <div className="flex gap-4 pl-2 text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="opt-upstock"
-                      className="w-4 h-4 text-blue-600"
-                      checked={!excelUpdateStock}
-                      onChange={() => setExcelUpdateStock(false)}
-                    />
-                    <span>Không</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="opt-upstock"
-                      className="w-4 h-4 text-blue-600"
-                      checked={excelUpdateStock}
-                      onChange={() => setExcelUpdateStock(true)}
-                    />
-                    <span>Có</span>
-                  </label>
-                </div>
-              </div>
+                  {/* Right: Validation parameters (Screenshot 9) */}
+                  <div className="bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-850 rounded-xl p-4 md:p-5 space-y-4">
+                    <h4 className="font-black text-xs uppercase text-slate-900 dark:text-white pb-2 border-b border-slate-205 dark:border-slate-800 flex items-center gap-1.5">
+                      ⚡ THIẾT LẬP THAM SỐ KIỂM TRA SÁNG LỌC
+                    </h4>
 
-              {/* Question 4: Cập nhật giá vốn? */}
-              <div className="space-y-2 border-b border-slate-100 pb-3 text-xs">
-                <span className="font-extrabold text-[#1F2937] uppercase tracking-wider block">Cập nhật giá vốn?</span>
-                <div className="flex gap-4 pl-2 text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="opt-upcost"
-                      className="w-4 h-4 text-blue-600"
-                      checked={!excelUpdateCostPrice}
-                      onChange={() => setExcelUpdateCostPrice(false)}
-                    />
-                    <span>Không</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="opt-upcost"
-                      className="w-4 h-4 text-blue-600"
-                      checked={excelUpdateCostPrice}
-                      onChange={() => setExcelUpdateCostPrice(true)}
-                    />
-                    <span>Có</span>
-                  </label>
-                </div>
-              </div>
+                    {/* Param 1: Trùng mã hàng/mã vạch khác tên */}
+                    <div className="space-y-1.5 pb-2 border-b border-slate-200/50 dark:border-slate-800/50">
+                      <span className="font-extrabold text-slate-700 dark:text-slate-300 text-[11px] uppercase block">
+                        Xử lý trùng mã hàng, khác tên hàng hóa:
+                      </span>
+                      <div className="flex gap-4 text-xs font-bold pl-1">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="radio"
+                            name="conflict-mami"
+                            className="w-4 h-4 text-blue-600"
+                            checked={excelConflictResult === 'error'}
+                            onChange={() => {
+                              setExcelConflictResult('error');
+                              setTimeout(() => processParsedContent(excelInputText, excelImportType), 50);
+                            }}
+                          />
+                          <span>Báo lỗi dừng import</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none text-emerald-600">
+                          <input
+                            type="radio"
+                            name="conflict-mami"
+                            className="w-4 h-4 text-blue-600"
+                            checked={excelConflictResult === 'replace'}
+                            onChange={() => {
+                              setExcelConflictResult('replace');
+                              setTimeout(() => processParsedContent(excelInputText, excelImportType), 50);
+                            }}
+                          />
+                          <span>Ghi đè bằng tên hàng có trong file</span>
+                        </label>
+                      </div>
+                    </div>
 
-              {/* Question 5: Cập nhật mô tả? */}
-              <div className="space-y-2 text-xs">
-                <span className="font-extrabold text-[#1F2937] uppercase tracking-wider block">Cập nhật mô tả?</span>
-                <div className="flex gap-4 pl-2 text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="opt-updesc"
-                      className="w-4 h-4 text-blue-600"
-                      checked={!excelUpdateDesc}
-                      onChange={() => setExcelUpdateDesc(false)}
-                    />
-                    <span>Không</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="opt-updesc"
-                      className="w-4 h-4 text-blue-600"
-                      checked={excelUpdateDesc}
-                      onChange={() => setExcelUpdateDesc(true)}
-                    />
-                    <span>Có</span>
-                  </label>
+                    {/* Param 2: Trùng mã vạch */}
+                    <div className="space-y-1.5 pb-2 border-b border-slate-200/50 dark:border-slate-800/50">
+                      <span className="font-extrabold text-slate-700 dark:text-slate-300 text-[11px] uppercase block">
+                        Xử lý trùng mã vạch định danh:
+                      </span>
+                      <div className="flex gap-4 text-xs font-bold pl-1">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="radio"
+                            name="conflict-barcode"
+                            className="w-4 h-4 text-blue-600"
+                            checked={excelConflictBarcode === 'error'}
+                            onChange={() => setExcelConflictBarcode('error')}
+                          />
+                          <span>Báo lỗi và dừng import</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none text-blue-600">
+                          <input
+                            type="radio"
+                            name="conflict-barcode"
+                            className="w-4 h-4 text-blue-600"
+                            checked={excelConflictBarcode === 'replace'}
+                            onChange={() => setExcelConflictBarcode('replace')}
+                          />
+                          <span>Bỏ qua mã cũ, áp mã mới</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Param 3: Cập nhật tồn kho hoặc tự tạo khi chưa tồn tại */}
+                    <div className="space-y-1.5 pb-2 border-b border-slate-200/50 dark:border-slate-800/50">
+                      <span className="font-extrabold text-slate-700 dark:text-slate-300 text-[11px] uppercase block">
+                        Nếu mã hàng chưa tồn tại trên hệ thống:
+                      </span>
+                      <div className="flex gap-4 text-xs font-bold pl-1">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="radio"
+                            name="opt-upstock"
+                            className="w-4 h-4 text-blue-600"
+                            checked={!excelUpdateStock}
+                            onChange={() => {
+                              setExcelUpdateStock(false);
+                              setTimeout(() => processParsedContent(excelInputText, excelImportType), 50);
+                            }}
+                          />
+                          <span>Báo lỗi không cho phép</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none text-emerald-600">
+                          <input
+                            type="radio"
+                            name="opt-upstock"
+                            className="w-4 h-4 text-blue-600"
+                            checked={excelUpdateStock}
+                            onChange={() => {
+                              setExcelUpdateStock(true);
+                              setTimeout(() => processParsedContent(excelInputText, excelImportType), 50);
+                            }}
+                          />
+                          <span>Tự tạo sản phẩm mới</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Param 4: Cập nhật giá vốn */}
+                    <div className="space-y-1.5 pb-2 border-b border-slate-200/50 dark:border-slate-800/50">
+                      <span className="font-extrabold text-slate-700 dark:text-slate-300 text-[11px] uppercase block">
+                        Có cập nhật giá vốn gốc hàng hóa?
+                      </span>
+                      <div className="flex gap-4 text-xs font-bold pl-1">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="radio"
+                            name="opt-upcost"
+                            className="w-4 h-4 text-blue-600"
+                            checked={!excelUpdateCostPrice}
+                            onChange={() => setExcelUpdateCostPrice(false)}
+                          />
+                          <span>Không thay đổi</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer select-none text-blue-600">
+                          <input
+                            type="radio"
+                            name="opt-upcost"
+                            className="w-4 h-4 text-blue-600"
+                            checked={excelUpdateCostPrice}
+                            onChange={() => setExcelUpdateCostPrice(true)}
+                          />
+                          <span>Có cập nhật</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Param 5: Khai thông tin */}
+                    <div className="flex items-center justify-between gap-1.5 bg-emerald-50 dark:bg-emerald-950/20 p-2.5 rounded-lg border border-emerald-100 dark:border-emerald-900 text-[10px] text-emerald-700 dark:text-emerald-400">
+                      <div>
+                        💡 <strong>Lưu ý quan trọng:</strong> Hệ thống sử dụng thuật toán thông minh chuẩn Đức để loại bỏ dấu, lọc khoảng trắng thừa, và so trùng mã nhằm hạn chế tối đa trùng lặp tồn kho.
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
-              </div>
+              ) : (
+                /* Step PREVIEW: Validation Results Listing */
+                <div className="space-y-5 animate-in fade-in zoom-in duration-150">
+                  
+                  {/* Cards Dashboard summarizing validation outcome */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-sans text-stone-700">
+                    
+                    <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <span className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Tổng số dòng nạp</span>
+                        <div className="text-2xl font-black text-slate-900 dark:text-white font-mono">{excelRows.length} dòng</div>
+                      </div>
+                      <FileSpreadsheet className="w-10 h-10 text-slate-400 opacity-60" />
+                    </div>
+
+                    <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 p-4 rounded-xl flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider">Hợp lệ (Sẵn sàng nhập)</span>
+                        <div className="text-2xl font-black text-emerald-700 dark:text-emerald-400 font-mono">
+                          {excelRows.filter(r => r.status === 'valid').length} dòng
+                        </div>
+                      </div>
+                      <Check className="w-10 h-10 text-emerald-500 opacity-60" />
+                    </div>
+
+                    <div className={`p-4 rounded-xl flex items-center justify-between border ${
+                      excelRows.some(r => r.status === 'invalid')
+                        ? 'bg-red-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900'
+                        : 'bg-slate-50 dark:bg-slate-900 border-slate-200'
+                    }`}>
+                      <div className="space-y-0.5">
+                        <span className={`text-[11px] font-bold uppercase tracking-wider ${
+                          excelRows.some(r => r.status === 'invalid') ? 'text-red-500' : 'text-slate-400'
+                        }`}>Dòng bị lỗi loại bỏ</span>
+                        <div className={`text-2xl font-black font-mono ${
+                          excelRows.some(r => r.status === 'invalid') ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500'
+                        }`}>
+                          {excelRows.filter(r => r.status === 'invalid').length} dòng
+                        </div>
+                      </div>
+                      <AlertCircle className={`w-10 h-10 opacity-60 ${
+                        excelRows.some(r => r.status === 'invalid') ? 'text-red-500' : 'text-slate-400'
+                      }`} />
+                    </div>
+
+                  </div>
+
+                  {/* Filter Status controls & Download Error option */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-100 dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-800 text-xs">
+                    <div className="flex items-center gap-1.5 select-none w-full sm:w-auto">
+                      <span className="font-bold text-slate-550 mr-1 text-[11px] uppercase tracking-wider">Bộ lọc hiển thị:</span>
+                      <button
+                        type="button"
+                        onClick={() => setFilterStatus('all')}
+                        className={`px-3 py-1.5 font-bold rounded ${
+                          filterStatus === 'all'
+                            ? 'bg-slate-700 text-white'
+                            : 'bg-white dark:bg-slate-850 hover:bg-slate-50 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        Tất cả dòng ({excelRows.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFilterStatus('valid')}
+                        className={`px-3 py-1.5 font-bold rounded ${
+                          filterStatus === 'valid'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-white dark:bg-slate-850 hover:bg-slate-50 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        Chỉ dòng Hợp lệ ({excelRows.filter(r => r.status === 'valid').length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFilterStatus('invalid')}
+                        className={`px-3 py-1.5 font-bold rounded ${
+                          filterStatus === 'invalid'
+                            ? 'bg-rose-600 text-white'
+                            : 'bg-white dark:bg-slate-850 hover:bg-slate-50 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        Dòng có lỗi ({excelRows.filter(r => r.status === 'invalid').length})
+                      </button>
+                    </div>
+
+                    <div className="shrink-0 w-full sm:w-auto flex justify-end">
+                      {excelRows.some(r => r.status === 'invalid') && (
+                        <button
+                          type="button"
+                          onClick={handleDownloadErrorsCSV}
+                          className="px-4 py-2 bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-700 text-[11px] font-black rounded-lg transition flex items-center gap-1.5"
+                        >
+                          📥 Xuất danh sách dòng lỗi (.csv)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Datatable showing parsed and checked items */}
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-x-auto max-h-[350px] overflow-y-auto">
+                    <table className="w-full text-left text-xs bg-white dark:bg-slate-905 select-none">
+                      <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-[10px] text-slate-500 uppercase tracking-widest sticky top-0">
+                        <tr>
+                          <th className="p-3 font-extrabold w-12 text-center">Dòng</th>
+                          <th className="p-3 font-extrabold w-36">Mã hàng</th>
+                          <th className="p-3 font-extrabold">Tên hàng hóa</th>
+                          {excelImportType === 'purchase' && (
+                            <>
+                              <th className="p-3 font-extrabold w-20 text-center">S.Lượng</th>
+                              <th className="p-3 font-extrabold w-28 text-right">Giá gốc nạp</th>
+                            </>
+                          )}
+                          {excelImportType === 'products' && (
+                            <>
+                              <th className="p-3 font-extrabold w-28 text-right">Giá vốn</th>
+                              <th className="p-3 font-extrabold w-28 text-right">Giá niêm yết</th>
+                            </>
+                          )}
+                          <th className="p-3 font-extrabold w-24">Vị thế</th>
+                          <th className="p-3 font-extrabold">Kết quả lọc lỗi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-850 font-sans">
+                        {excelRows
+                          .filter(r => {
+                            if (filterStatus === 'valid') return r.status === 'valid';
+                            if (filterStatus === 'invalid') return r.status === 'invalid';
+                            return true;
+                          })
+                          .map((row, idx) => (
+                            <tr
+                              key={idx}
+                              className={`hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition duration-150 ${
+                                row.status === 'invalid' ? 'bg-rose-50/20' : ''
+                              }`}
+                            >
+                              <td className="p-3 font-mono font-bold text-slate-400 text-center">{row._lineNum}</td>
+                              <td className="p-3 font-mono font-black text-slate-700 dark:text-slate-350">{row.maSP}</td>
+                              <td className="p-3 font-bold text-slate-900 dark:text-white truncate max-w-[200px]" title={row.tenSP}>
+                                {row.tenSP || "— Lack and Missing —"}
+                              </td>
+                              {excelImportType === 'purchase' && (
+                                <>
+                                  <td className="p-3 font-mono font-extrabold text-blue-600 text-center">{row.quantity}</td>
+                                  <td className="p-3 font-mono text-center text-slate-600 dark:text-slate-400 text-right">{formatVND(row.costPrice)}</td>
+                                </>
+                              )}
+                              {excelImportType === 'products' && (
+                                <>
+                                  <td className="p-3 font-mono text-slate-600 dark:text-slate-400 text-right">{formatVND(row.costPrice)}</td>
+                                  <td className="p-3 font-mono text-blue-600 text-right font-bold">{formatVND(row.salePrice)}</td>
+                                </>
+                              )}
+                              <td className="p-3">
+                                {row.actionType === 'create' ? (
+                                  <span className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400 text-[9px] px-1.5 py-0.5 rounded font-black uppercase">Mới tinh</span>
+                                ) : row.actionType === 'update' ? (
+                                  <span className="bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400 text-[9px] px-1.5 py-0.5 rounded font-black uppercase">Cập nhật</span>
+                                ) : (
+                                  <span className="bg-rose-50 text-rose-700 dark:bg-rose-950/20 dark:text-rose-400 text-[9px] px-1.5 py-0.5 rounded font-black uppercase">Lỗi loại bỏ</span>
+                                )}
+                              </td>
+                              <td className="p-3 text-[11px]">
+                                {row.status === 'valid' ? (
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                    ✓ {row.detail}
+                                  </span>
+                                ) : (
+                                  <span className="text-rose-600 dark:text-rose-400 font-black flex items-center gap-1 bg-rose-50/80 dark:bg-rose-950/30 px-2 py-1 rounded">
+                                    ⚠ {row.detail}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        
+                        {excelRows.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="text-center p-8 text-slate-400 font-bold">
+                              Dữ liệu rỗng. Hãy copy paste từ file mẫu hoặc tệp của bạn để khởi tạo!
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                </div>
+              )}
 
             </div>
 
             {/* Bottom Submit bar representing blue action block in Screenshot 9 */}
-            <div className="bg-slate-50 p-4 border-t border-slate-200 flex justify-end gap-2 text-xs px-6">
-              <button
-                type="button"
-                onClick={() => setShowExcelWizard(false)}
-                className="px-4 py-2 border border-slate-300 bg-white rounded font-bold text-slate-600 hover:text-slate-800 cursor-pointer"
-              >
-                Hủy bỏ
-              </button>
+            <div className="bg-slate-50 dark:bg-slate-900 p-4 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center gap-2 text-xs px-6">
               
-              {/* Blue solid matching "Chọn file dữ liệu" in Screenshot 9 */}
-              <button
-                type="button"
-                onClick={handleFinishExcelImport}
-                className="px-5 py-2.5 bg-[#0066FF] hover:bg-blue-700 text-white rounded font-extrabold cursor-pointer border border-blue-700 flex items-center gap-1.5 shadow-[0_4px_10px_rgba(0,102,255,0.2)]"
-              >
-                <Upload className="w-3.5 h-3.5 text-white" />
-                Chọn file dữ liệu
-              </button>
+              <div className="text-slate-400 font-bold text-[11px]">
+                {excelShowPreview ? (
+                  <span>
+                    Tổng dòng hợp lệ được nạp: <strong className="text-emerald-600 font-mono text-xs">{excelRows.filter(r => r.status === 'valid').length}</strong> dòng
+                  </span>
+                ) : (
+                  <span>Chọn 1 trong 2 cách nạp để hệ thống kiểm toán lỗi trực diện.</span>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowExcelWizard(false);
+                    setExcelShowPreview(false);
+                  }}
+                  className="px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 border border-slate-350 dark:border-slate-700 rounded font-bold text-slate-600 dark:text-slate-300 hover:text-slate-800 cursor-pointer text-[12px]"
+                >
+                  Hủy bỏ
+                </button>
+
+                {excelShowPreview ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setExcelShowPreview(false)}
+                      className="px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 bg-white dark:bg-slate-800 font-extrabold rounded-lg text-[12px] transition"
+                    >
+                      Quay lại sửa thiết lập
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExecuteImport}
+                      disabled={excelRows.filter(r => r.status === 'valid').length === 0}
+                      className="px-6 py-2 bg-[#0066FF] hover:bg-blue-700 text-white font-extrabold rounded-lg text-[12px] shadow-[0_4px_12px_rgba(0,102,255,0.25)] transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                    >
+                      <Check className="w-4 h-4 text-white" />
+                      Import {excelRows.filter(r => r.status === 'valid').length} dòng hợp lệ vào app
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!excelInputText.trim()) {
+                        alert("Vui lòng tải file hoặc dán dữ liệu thô từ Excel/CSV trước khi tiến hành lọc dữ liệu!");
+                        return;
+                      }
+                      setExcelShowPreview(true);
+                      setFilterStatus('all');
+                    }}
+                    className="px-6 py-2.5 bg-[#0066FF] hover:bg-blue-700 text-white rounded font-extrabold cursor-pointer border border-blue-700 flex items-center gap-1.5 shadow-[0_4px_10px_rgba(0,102,255,0.2)]"
+                  >
+                    Tiến hành kiểm tra & Xem trước lỗi 🔎
+                  </button>
+                )}
+              </div>
             </div>
 
           </div>

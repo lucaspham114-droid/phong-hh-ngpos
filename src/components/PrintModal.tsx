@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { X, Printer, Settings, Check, CreditCard, RefreshCw, Smartphone, MapPin, MessageSquare, Heart } from 'lucide-react';
-import { Invoice, ImportSlip, SystemSettings } from '../types';
+import { Invoice, ImportSlip, SystemSettings, Product, Customer } from '../types';
 import { formatVND, formatDate } from '../utils';
 
 interface PrintModalProps {
@@ -9,10 +9,87 @@ interface PrintModalProps {
   invoice?: Invoice;
   importSlip?: ImportSlip;
   settings: SystemSettings;
-  selectedTemplate: 'a5_01' | 'a5_02' | 'k58_01' | 'k58_02' | 'k80_01';
-  onUpdateTemplate: (template: 'a5_01' | 'a5_02' | 'k58_01' | 'k58_02' | 'k80_01') => void;
+  products?: Product[];
+  customers?: Customer[];
+  selectedTemplate: 'a5_01' | 'a5_02' | 'k58_01' | 'k58_02' | 'k80_01' | 'a5_kiotviet';
+  onUpdateTemplate: (template: 'a5_01' | 'a5_02' | 'k58_01' | 'k58_02' | 'k80_01' | 'a5_kiotviet') => void;
   isDraft?: boolean;
   onShowToast?: (message: string, type?: 'success' | 'info' | 'error') => void;
+}
+
+function docSoTienVND(prefixNumber: number): string {
+  if (prefixNumber === 0) return "Không đồng chẵn";
+  const units = ["", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"];
+  const sections = ["", " nghìn", " triệu", " tỷ", " nghìn tỷ", " triệu tỷ"];
+
+  let res = "";
+  let numStr = Math.floor(prefixNumber).toString();
+  
+  while (numStr.length % 3 !== 0) {
+    numStr = "0" + numStr;
+  }
+
+  const chunks: string[] = [];
+  for (let i = 0; i < numStr.length; i += 3) {
+    chunks.push(numStr.substr(i, 3));
+  }
+
+  const readChunk = (chunk: string, isFirst: boolean): string => {
+    let aStr = "";
+    const tram = parseInt(chunk[0]);
+    const chuc = parseInt(chunk[1]);
+    const donVi = parseInt(chunk[2]);
+
+    if (!isFirst || tram > 0) {
+      aStr += units[tram] + " trăm ";
+    }
+
+    if (chuc === 0) {
+      if (donVi > 0) {
+        if (tram > 0 || !isFirst) {
+          aStr += "lẻ ";
+        }
+        aStr += units[donVi];
+      }
+    } else if (chuc === 1) {
+      aStr += "mười ";
+      if (donVi === 5) {
+        aStr += "lăm";
+      } else if (donVi === 1) {
+        aStr += "một";
+      } else if (donVi > 0) {
+        aStr += units[donVi];
+      }
+    } else {
+      aStr += units[chuc] + " mươi ";
+      if (donVi === 5) {
+        aStr += "lăm";
+      } else if (donVi === 1) {
+        aStr += "mốt";
+      } else if (donVi > 0) {
+        aStr += units[donVi];
+      }
+    }
+    return aStr.trim();
+  };
+
+  const nChunks = chunks.length;
+  for (let i = 0; i < nChunks; i++) {
+    const chunk = chunks[i];
+    const val = parseInt(chunk);
+    if (val === 0) continue;
+
+    const chunkStr = readChunk(chunk, i === 0);
+    const pos = nChunks - 1 - i;
+    res += chunkStr + sections[pos] + " ";
+  }
+
+  res = res.trim();
+  if (res.length > 0) {
+    res = res.charAt(0).toUpperCase() + res.slice(1);
+    return res + " đồng chẵn";
+  }
+  return "Không đồng";
 }
 
 export default function PrintModal({
@@ -21,6 +98,8 @@ export default function PrintModal({
   invoice,
   importSlip,
   settings,
+  products = [],
+  customers = [],
   selectedTemplate,
   onUpdateTemplate,
   isDraft = false,
@@ -53,6 +132,129 @@ export default function PrintModal({
   const item = invoice || importSlip;
   if (!item) return null;
 
+  const renderPrintLogoHelper = (className = "w-10 h-10", forceMono = false) => {
+    const logoType = settings.brandLogoType || 'default';
+    const logoShape = settings.brandLogoShape || 'circle';
+    const logoColor = forceMono ? '#000000' : (settings.brandLogoColor || '#E11D48');
+    const isGlow = forceMono ? false : (settings.brandLogoGlow !== false);
+    const strokeWidth = settings.brandLogoBorderWidth !== undefined ? settings.brandLogoBorderWidth : 3;
+    const logoImage = settings.brandLogoImage || settings.logoImage;
+    const initials = settings.logoInitials || 'PH';
+
+    // Outer border style
+    const borderStyle = {
+      stroke: logoColor,
+      strokeWidth: strokeWidth,
+      fill: 'white',
+    };
+
+    const logoStyle: React.CSSProperties = {
+      filter: isGlow ? `drop-shadow(0 0 6px ${logoColor}99)` : 'none',
+    };
+
+    return (
+      <svg 
+        viewBox="0 0 100 100" 
+        className={className} 
+        style={logoStyle}
+      >
+        <defs>
+          <linearGradient id="printFlame1" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={logoColor} />
+            <stop offset="100%" stopColor={forceMono ? "#666666" : "#F59E0B"} />
+          </linearGradient>
+          <linearGradient id="printFlame2" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor={forceMono ? "#666666" : "#F59E0B"} />
+            <stop offset="100%" stopColor={logoColor} />
+          </linearGradient>
+          
+          <clipPath id="print-logo-clip-circle">
+            <circle cx="50" cy="50" r={48 - strokeWidth} />
+          </clipPath>
+          <clipPath id="print-logo-clip-squircle">
+            <path d="M 25,10 C 50,10 50,10 75,10 C 90,10 90,20 90,50 C 90,80 90,80 75,90 C 50,90 50,90 25,90 C 10,90 10,80 10,50 C 10,20 10,10 25,10 Z" />
+          </clipPath>
+          <clipPath id="print-logo-clip-hexagon">
+            <path d="M 50,6 L 88,28 L 88,72 L 50,94 L 12,72 L 12,28 Z" />
+          </clipPath>
+        </defs>
+
+        {/* Outer Backing Shape & Stroke */}
+        {logoShape === 'circle' && (
+          <circle cx="50" cy="50" r={48 - (strokeWidth / 2)} {...borderStyle} />
+        )}
+        {logoShape === 'squircle' && (
+          <path d="M 25,10 C 50,10 50,10 75,10 C 90,10 90,20 90,50 C 90,80 90,80 75,90 C 50,90 50,90 25,90 C 10,90 10,80 10,50 C 10,20 10,10 25,10 Z" {...borderStyle} />
+        )}
+        {logoShape === 'hexagon' && (
+          <path d="M 50,6 L 88,28 L 88,72 L 50,94 L 12,72 L 12,28 Z" {...borderStyle} />
+        )}
+
+        {/* Middle Design Component Content */}
+        {logoType === 'image' && logoImage ? (
+          <image 
+            href={logoImage} 
+            x="0" 
+            y="0" 
+            width="100" 
+            height="100" 
+            clipPath={`url(#print-logo-clip-${logoShape})`} 
+            preserveAspectRatio="xMidYMid slice" 
+          />
+        ) : logoType === 'flames' ? (
+          <g transform="translate(10, 10) scale(0.8)">
+            <path d="M 50,5 C 65,30 80,45 80,65 C 80,82 66,95 50,95 C 34,95 20,82 20,65 C 20,45 35,30 50,5 Z" fill="url(#printFlame1)" />
+            <path d="M 50,25 C 60,42 70,55 70,70 C 70,82 61,90 50,90 C 39,90 30,82 30,70 C 30,55 40,42 50,25 Z" fill="url(#printFlame2)" />
+            <path d="M 50,45 C 55,55 60,65 60,75 C 60,82 55,87 50,87 C 45,87 40,82 40,75 C 40,65 45,55 50,45 Z" fill={forceMono ? "#cccccc" : "#FBBF24"} />
+          </g>
+        ) : logoType === 'chef' ? (
+          <g transform="translate(18, 16) scale(0.65)" stroke={logoColor} fill="none" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M 20,68 C 15,68 12,62 15,55 C 10,48 15,35 25,38 C 30,20 50,15 60,25 C 75,18 88,32 82,46 C 88,54 85,68 70,68 Z" />
+            <path d="M 25,68 L 75,68 L 70,85 L 30,85 Z" fill={logoColor} fillOpacity={forceMono ? "0.3" : "0.1"} />
+            <line x1="33" y1="76" x2="67" y2="76" />
+            <path d="M 50,38 L 53,46 L 61,46 L 54,51 L 57,59 L 50,54 L 43,59 L 46,51 L 39,46 L 47,46 Z" fill={logoColor} stroke="none" />
+          </g>
+        ) : logoType === 'shield' ? (
+          <g transform="translate(18, 15) scale(0.65)" stroke={logoColor} fill="none" strokeWidth="5" strokeLinejoin="round" strokeLinecap="round">
+            <path d="M 12,10 L 50,2 L 88,10 C 88,45 70,75 50,95 C 30,75 12,45 12,10 Z" fill={logoColor} fillOpacity={forceMono ? "0.3" : "0.1"} />
+            <path d="M 50,25 L 50,70 Q 50,82 50,82" strokeWidth="6" />
+            <path d="M 32,45 L 68,45" strokeWidth="6" />
+          </g>
+        ) : logoType === 'crown' ? (
+          <g transform="translate(15, 15) scale(0.7)" stroke={logoColor} fill="none" strokeWidth="5" strokeLinejoin="round" strokeLinecap="round">
+            <path d="M 10,75 L 20,40 L 40,55 L 50,25 L 60,55 L 80,40 L 90,75 Z" fill={logoColor} fillOpacity={forceMono ? "0.3" : "0.1"} />
+            <rect x="10" y="75" width="80" height="10" rx="3" fill={logoColor} stroke="none" />
+            <circle cx="50" cy="22" r="5" fill={logoColor} stroke="none" />
+            <circle cx="20" cy="37" r="4" fill={logoColor} stroke="none" />
+            <circle cx="80" cy="37" r="4" fill={logoColor} stroke="none" />
+          </g>
+        ) : logoType === 'inductor' ? (
+          <g transform="translate(12, 12) scale(0.76)" stroke={logoColor} fill="none" strokeWidth="4" strokeLinecap="round">
+            <circle cx="50" cy="50" r="42" strokeDasharray="4 4" />
+            <circle cx="50" cy="50" r="30" strokeWidth="5" />
+            <circle cx="50" cy="50" r="16" fill={logoColor} stroke="none" />
+            <line x1="50" y1="8" x2="50" y2="92" strokeWidth="2.5" />
+            <line x1="8" y1="50" x2="92" y2="50" strokeWidth="2.5" />
+          </g>
+        ) : (
+          /* Default Phong Hung Germany with Custom initials / PH */
+          <>
+            <circle cx="50" cy="50" r="46" fill="white" stroke={logoColor} strokeWidth="3" />
+            <path d="M 12,50 C 35,20 65,80 88,50 C 75,75 25,75 12,50 Z" fill={logoColor} />
+            <path d="M 12,50 C 35,40 65,60 88,50 C 75,85 25,85 12,50 Z" fill="#000" />
+            <path d="M 15,58 C 35,50 65,70 85,58 C 75,90 25,90 15,58 Z" fill={forceMono ? "#999999" : "#f59e0b"} />
+            <text x="50" y="44" fontFamily="sans-serif" fontWeight="900" fontSize="16" fill="#111827" textAnchor="middle">{initials}</text>
+            <path id="print_curve_emblem" d="M 18,34 A 32,32 0 0,1 82,34" fill="none" />
+            <text className="font-bold tracking-widest font-sans" style={{ fill: logoColor, fontSize: '7px' }} textAnchor="middle">
+              <textPath href="#print_curve_emblem" startOffset="50%">PHONG HUNG</textPath>
+            </text>
+            <text x="50" y="88" fontFamily="sans-serif" fontWeight="800" fontSize="7" fill={logoColor} letterSpacing="0.5" textAnchor="middle">GERMANY</text>
+          </>
+        )}
+      </svg>
+    );
+  };
+
   // Render correct print layout according to selection
   const handlePrint = () => {
     const printContent = printRef.current?.innerHTML;
@@ -67,6 +269,7 @@ export default function PrintModal({
           <html>
             <head>
               <title>In Phiếu - ${customShopName}</title>
+              <script src="https://cdn.tailwindcss.com"></script>
               <style>
                 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
                 
@@ -86,7 +289,7 @@ export default function PrintModal({
                   box-sizing: border-box;
                 }
                 
-                .format-a5_01, .format-a5_02 {
+                .format-a5_01, .format-a5_02, .format-a5_kiotviet {
                   width: 148mm;
                   max-width: 100%;
                   font-size: 11px;
@@ -250,10 +453,29 @@ export default function PrintModal({
                 /* Print specific page overrides */
                 @media print {
                   @page {
-                    margin: 2mm;
+                    margin: 0 !important;
                   }
                   body {
-                    padding: 0;
+                    padding: 0 !important; margin: 0 !important;
+                  }
+                  /* Adaptive margins/paddings and auto widths for thermal rolls */
+                  .format-k58_01, .format-k58_02 {
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    padding: 1.5mm 2.5mm !important;
+                    box-sizing: border-box !important;
+                  }
+                  .format-k80_01 {
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    padding: 2.5mm 3.5mm !important;
+                    box-sizing: border-box !important;
+                  }
+                  .format-a5_01, .format-a5_02, .format-a5_kiotviet {
+                    width: 148mm !important;
+                    max-width: 148mm !important;
+                    padding: 6mm !important;
+                    box-sizing: border-box !important;
                   }
                   .no-print {
                     display: none;
@@ -300,6 +522,7 @@ export default function PrintModal({
         return 'w-[330px] text-[11px]';
       case 'a5_01':
       case 'a5_02':
+      case 'a5_kiotviet':
       default:
         return 'w-full max-w-[500px] text-[12px]';
     }
@@ -326,6 +549,7 @@ export default function PrintModal({
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider font-sans block">Sơ đồ Mẫu Hóa Đơn</label>
               <div className="grid grid-cols-1 gap-1.5">
                 {[
+                  { id: 'a5_kiotviet', label: 'Khổ A5 - Mẫu in KiotViet' },
                   { id: 'a5_01', label: 'Khổ A5 - Truyền thống' },
                   { id: 'a5_02', label: 'Khổ A5 - Chi tiết Bank & MXH' },
                   { id: 'k58_01', label: 'Khổ K58 - Cuộn siêu thị barcode' },
@@ -592,6 +816,156 @@ export default function PrintModal({
                 }
 
                 // ------------------------------------
+                // TEMPLATE a5_kiotviet: EXQUISITE KIOTVIET INSPIRED
+                // ------------------------------------
+                if (selectedTemplate === 'a5_kiotviet') {
+                  const custObj = isInvoice ? customers?.find(c => c.maKH === invoice?.maKH || c.tenKH === invoice?.tenKH) : null;
+                  const customerAddress = invoice?.maKH === 'KH000001' 
+                    ? 'Số 10, Phổ Quang, Tân Bình, TPHCM' 
+                    : custObj?.diaChi || "Tại cửa hàng";
+                  const customerPhone = isInvoice ? invoice?.sdtKH : (importSlip as any)?.sdtNCC || '';
+
+                  // Dynamic Date calculations matching: "Ngày 08 tháng 05 năm 2014" or invoice date
+                  const d = new Date(docDate);
+                  const dateDay = String(d.getDate()).padStart(2, '0');
+                  const dateMonth = String(d.getMonth() + 1).padStart(2, '0');
+                  const dateYear = d.getFullYear();
+
+                  // Calculate total quantities
+                  const totalQty = detailsList.reduce((sum: number, x: any) => sum + (x.soLuong || 0), 0);
+                  const wordSpelling = docSoTienVND(item.tongTien);
+
+                  return (
+                    <div className="space-y-4 text-black font-sans leading-relaxed" style={{ color: '#000' }}>
+                      {/* Top section: Logo on left, store details in center, invoice number on right */}
+                      <div className="grid grid-cols-3 gap-2 items-start justify-between border-b pb-3 border-slate-350">
+                        {/* 1. Left cell: Actual Shop Logo */}
+                        <div className="flex items-center gap-2 select-none">
+                          {renderPrintLogoHelper("w-11 h-11 shrink-0")}
+                          <div className="leading-tight text-left">
+                            <span className="text-xs font-black tracking-tight text-slate-800 uppercase block leading-none">{customShopName || 'Phong Hùng'}</span>
+                            <span className="text-[8px] text-[#1EC460] font-extrabold uppercase tracking-widest block mt-0.5">POS SYSTEM</span>
+                          </div>
+                        </div>
+
+                        {/* 2. Center cell: Store core information (removed Address as requested) */}
+                        <div className="text-center space-y-0.5">
+                          <h2 className="text-xs font-black tracking-wider uppercase text-slate-900">{storeNameUpper}</h2>
+                          <p className="text-[10px] text-slate-750 font-bold">SĐT: {customPhone}</p>
+                        </div>
+
+                        {/* 3. Right cell: Document visual serial code */}
+                        <div className="text-right text-[11px] font-sans">
+                          <p className="font-bold">Số: <span className="text-rose-600 font-extrabold">{docId}</span></p>
+                          <p className="text-[9px] text-slate-400 mt-0.5">Powered by KiotViet</p>
+                        </div>
+                      </div>
+
+                      {/* Header title */}
+                      <div className="text-center py-2">
+                        <h2 className="text-base font-black tracking-widest uppercase text-slate-900">
+                          {isInvoice ? (isDraft ? "HÓA ĐƠN TẠM TÍNH" : "HÓA ĐƠN BÁN HÀNG") : "PHIẾU NHẬP HÀNG"}
+                        </h2>
+                      </div>
+
+                      {/* Client / Supplier details layout block spacing */}
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-[11px] pb-2 border-b border-dashed border-slate-300">
+                        <div>
+                          <p>
+                            <span className="text-slate-500 font-bold">{isInvoice ? 'Khách hàng: ' : 'Nhà cung cấp: '}</span>
+                            <strong className="text-slate-900">{isInvoice ? invoice?.tenKH : (importSlip as any)?.tenNCC || 'Khách vãng lai'}</strong>
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p>
+                            <span className="text-slate-500 font-bold">Số điện thoại: </span>
+                            <strong className="text-slate-950">{customerPhone || '-'}</strong>
+                          </p>
+                        </div>
+                        <div className="col-span-2">
+                          <p className="leading-normal">
+                            <span className="text-slate-500 font-bold">Địa chỉ: </span>
+                            <span className="text-slate-800 font-semibold">{isInvoice ? customerAddress : (importSlip as any)?.diaChi || 'Tại cửa hàng'}</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Main elegant classical border-lined tables */}
+                      <table className="w-full text-left text-[11px] border-collapse border border-black font-sans">
+                        <thead>
+                          <tr className="bg-slate-50 text-slate-900 font-black border-b border-black uppercase text-[10px]">
+                            <th className="py-1 px-1 text-center border-r border-black w-8">STT</th>
+                            <th className="py-1 px-2 border-r border-black">Tên Hàng</th>
+                            <th className="py-1 px-1 text-center border-r border-black w-10">ĐVT</th>
+                            <th className="py-1 px-1 text-center border-r border-black w-10">SL</th>
+                            <th className="py-1 px-2 text-right border-r border-black">Đơn giá</th>
+                            <th className="py-1 px-2 text-right border-r border-black">Chiết khấu</th>
+                            <th className="py-1 px-2 text-right">Thành tiền</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detailsList.map((detail: any, idx: number) => {
+                            const prod = products?.find(p => p.maSP === detail.maSP);
+                            const dvt = prod?.dvt || "cái";
+                            // Proportional discount distribution based on total discount
+                            const discountItemVal = isInvoice && (invoice?.giamGia || 0) > 0 && item.tongTien > 0
+                              ? Math.round(((invoice.giamGia || 0) * detail.thanhTien) / item.tongTien / (detail.soLuong || 1))
+                              : 0;
+                            return (
+                              <tr key={idx} className="border-b border-black text-slate-900">
+                                <td className="py-1.5 px-1 text-center border-r border-black font-semibold">{idx + 1}</td>
+                                <td className="py-1.5 px-2 border-r border-black font-bold">{detail.tenSP}</td>
+                                <td className="py-1.5 px-1 text-center border-r border-black text-slate-700 italic">{dvt}</td>
+                                <td className="py-1.5 px-1 text-center border-r border-black font-black">{detail.soLuong}</td>
+                                <td className="py-1.5 px-2 text-right border-r border-black">{formatVND(detail.donGia || detail.donGiaNhap)}</td>
+                                <td className="py-1.5 px-2 text-right border-r border-black text-slate-500">{formatVND(discountItemVal)}</td>
+                                <td className="py-1.5 px-2 text-right font-bold text-slate-950">{formatVND(detail.thanhTien)}</td>
+                              </tr>
+                            );
+                          })}
+
+                          {/* Spanning sum row styled exactly like image */}
+                          <tr className="bg-slate-50 font-black border-t border-black text-slate-900">
+                            <td colSpan={3} className="py-1.5 px-3 text-center border-r border-black uppercase text-[10px]">CỘNG</td>
+                            <td className="py-1.5 px-1 text-center border-r border-black text-xs font-black">{totalQty}</td>
+                            <td className="border-r border-black"></td>
+                            <td className="border-r border-black"></td>
+                            <td className="py-1.5 px-2 text-right text-xs font-black text-slate-950">{formatVND(item.tongTien)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+
+                      {/* Literal spell-out phrase */}
+                      <div className="text-[11px] italic text-slate-900 py-1 flex items-center gap-1">
+                        <span>Viết bằng chữ:</span>
+                        <strong className="text-slate-900 font-bold italic">{wordSpelling}</strong>
+                      </div>
+
+                      {/* Signatures replaced by help/feedback texts as per requested image */}
+                      <div className="pt-2 space-y-3">
+                        <div className="text-right text-[11px] text-slate-700 font-bold">
+                          Ngày {dateDay} tháng {dateMonth} năm {dateYear}
+                        </div>
+
+                        <div className="text-center pt-2 border-t border-black space-y-1">
+                          <p className="text-[11px] font-black italic text-black leading-relaxed">
+                            Có bất cứ vấn đề gì sản phẩm Khách Hàng vui lòng liên hệ số Hotline để được hỗ trợ nhanh nhất!
+                          </p>
+                          <p className="text-[12px] font-black italic text-black">
+                            Cám ơn Quý Khách
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Small soft bottom signature footer */}
+                      <div className="text-center pt-2.5 border-t border-dashed border-slate-300 mt-4 select-none">
+                        <p className="text-[10px] text-slate-400 italic">Cảm ơn quý khách đã ủng hộ {customShopName}!</p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // ------------------------------------
                 // TEMPLATE a5_02: BANK TRANSFER & MXH
                 // ------------------------------------
                 if (selectedTemplate === 'a5_02') {
@@ -737,7 +1111,8 @@ export default function PrintModal({
                     <div className="space-y-3 font-sans text-[10px]">
                       {/* Compact Store details */}
                       <div className="text-center space-y-0.5 border-b border-dashed border-slate-300 pb-2">
-                        <h2 className="text-xs font-black tracking-tight uppercase">{customShopName}</h2>
+                        {renderPrintLogoHelper("w-9 h-9 mx-auto", true)}
+                        <h2 className="text-[11px] font-black tracking-tight uppercase leading-none mt-1">{customShopName}</h2>
                         <p className="text-[8px] text-slate-600">{customAddress}</p>
                         <p className="text-[8px] text-slate-600 font-bold">Hotline: {customPhone}</p>
                       </div>
@@ -804,7 +1179,8 @@ export default function PrintModal({
                     <div className="space-y-3 font-sans text-[10px]">
                       {/* Compact Store details */}
                       <div className="text-center pb-1">
-                        <h2 className="text-xs font-black tracking-tight uppercase text-slate-900">{customShopName}</h2>
+                        {renderPrintLogoHelper("w-9 h-9 mx-auto mb-1", true)}
+                        <h2 className="text-[11px] font-black tracking-tight uppercase text-slate-900 leading-normal">{customShopName}</h2>
                         <p className="text-[8px] text-slate-600">{customAddress}</p>
                         <p className="text-[8px] text-slate-600">Hotline: {customPhone}</p>
                       </div>
@@ -880,7 +1256,8 @@ export default function PrintModal({
                     <div className="space-y-3 font-sans text-xs">
                       {/* Thermal 8cm wide design */}
                       <div className="text-center pb-2 border-b border-slate-300">
-                        <h2 className="text-sm font-black uppercase tracking-tight">{customShopName}</h2>
+                        {renderPrintLogoHelper("w-10 h-10 mx-auto mb-1", true)}
+                        <h2 className="text-[13px] font-black uppercase tracking-tight leading-normal">{customShopName}</h2>
                         <p className="text-[10px] text-slate-600">{customAddress}</p>
                         <p className="text-[10px] text-slate-600 font-bold">SĐT: {customPhone}</p>
                       </div>

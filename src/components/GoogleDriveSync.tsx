@@ -14,8 +14,10 @@ import {
   ShieldCheck, 
   Grid,
   ExternalLink,
-  BookOpen
+  BookOpen,
+  FolderOpen
 } from "lucide-react";
+import firebaseConfig from "../../firebase-applet-config.json";
 import { googleSignIn, logoutGoogle, initAuth, getAccessToken } from "../googleAuth";
 import { 
   getOrCreateBackupFolder, 
@@ -88,6 +90,127 @@ export default function GoogleDriveSync({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [generatedSheetUrl, setGeneratedSheetUrl] = useState<string | null>(null);
+  const [pickerLoading, setPickerLoading] = useState(false);
+
+  // Helper to load Google APIs (gapi) and Picker library dynamically
+  const loadPickerAPI = (): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      const g = (window as any).google;
+      if (g && g.picker) {
+        resolve(g);
+        return;
+      }
+
+      // Loader callback when GAPI script loads
+      const loadGapi = () => {
+        const gapi = (window as any).gapi;
+        if (!gapi) {
+          reject(new Error("Không thể khởi tạo nền tảng Google API client (gapi)"));
+          return;
+        }
+        gapi.load("picker", {
+          callback: () => {
+            resolve((window as any).google);
+          },
+          onerror: () => {
+            reject(new Error("Lỗi khi tải thư viện Google Picker thông qua GAPI"));
+          }
+        });
+      };
+
+      if (!(window as any).gapi) {
+        const script = document.createElement("script");
+        script.src = "https://apis.google.com/js/api.js";
+        script.type = "text/javascript";
+        script.async = true;
+        script.onload = loadGapi;
+        script.onerror = () => reject(new Error("Không thể tải mã nguồn gapi.js"));
+        document.body.appendChild(script);
+      } else {
+        loadGapi();
+      }
+    });
+  };
+
+  const handleOpenGooglePicker = async () => {
+    const token = accessToken || (await getAccessToken());
+    if (!token) {
+      setErrorMessage("Vui lòng kết nối tài khoản Google trước khi sử dụng Google Picker.");
+      return;
+    }
+
+    setPickerLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const googleObj = await loadPickerAPI();
+      
+      const view = new googleObj.picker.DocsView()
+        .setMimeTypes("application/json") // Limit to JSON files
+        .setSelectFolderEnabled(false);
+
+      const picker = new googleObj.picker.PickerBuilder()
+        .addView(view)
+        .setOAuthToken(token)
+        .setDeveloperKey(firebaseConfig.apiKey)
+        .setTitle("Chọn tệp Sao lưu từ Google Drive của bạn (.json)")
+        .setCallback(async (data: any) => {
+          if (data[googleObj.picker.Response.ACTION] === googleObj.picker.Action.PICKED) {
+            const docSelected = data[googleObj.picker.Response.DOCUMENTS][0];
+            const fileId = docSelected[googleObj.picker.Document.ID];
+            const fileName = docSelected[googleObj.picker.Document.NAME];
+            await handleRestorePickedFile(fileId, fileName);
+          }
+        })
+        .build();
+
+      picker.setVisible(true);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMessage(`Không thể khởi tạo Google Picker: ${err.message || err}`);
+    } finally {
+      setPickerLoading(false);
+    }
+  };
+
+  const handleRestorePickedFile = async (fileId: string, fileName: string) => {
+    const token = accessToken || (await getAccessToken());
+    if (!token) {
+      setErrorMessage("Chương trình không có Token Google Auth.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `CẢNH BÁO: Bạn chuẩn bị nạp bản sao lưu "${fileName}" chọn từ Google Picker.\n` +
+      `Thao tác này sẽ GHI ĐÈ toàn bộ cơ sở dữ liệu hiện tại (Sản phẩm, Hóa đơn, Khách hàng, Cài đặt v.v.).\n` +
+      `Thao tác này KHÔNG THỂ HOÀN TÁC. Bạn có chắc chắn muốn tiến hành không?`
+    );
+
+    if (!confirmed) return;
+
+    setActionLoading("picker_restoring");
+    setErrorMessage(null);
+
+    try {
+      const fileDataRaw = await downloadFileContent(token, fileId);
+      const data = JSON.parse(fileDataRaw);
+
+      if (!data.payload || !data.meta) {
+        throw new Error("Cấu trúc tệp JSON không hợp lệ hoặc không phải bản sao lưu Phong Hung POS chuẩn chỉnh.");
+      }
+
+      onRestoreState(data.payload);
+      onAddSecurityLog("RESTORE_GOOGLE_PICKER", `Phục hồi cơ sở dữ liệu hệ thống thông qua Google Picker: ${fileName}`);
+      
+      alert(`Đã phục hồi dữ liệu thành công từ tệp Cloud Backup ngày: ${new Date(data.meta.exportedAt).toLocaleString("vi-VN")}`);
+      setSuccessMessage(`Khôi phục hệ thống Phong Hưng hoàn tất thành công từ file: ${fileName}`);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMessage(`Không thể khôi phục dữ liệu từ Google Picker: ${err.message || "Tệp sao lưu bị hỏng hoặc sai định dạng JSON"}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   // Auto-clear messages after 6 seconds
   useEffect(() => {
@@ -870,15 +993,31 @@ export default function GoogleDriveSync({
           </div>
           
           {googleUser && (
-            <button
-              type="button"
-              onClick={handleManualSyncList}
-              disabled={loading}
-              className="p-1 px-2.5 bg-white dark:bg-slate-800 hover:bg-slate-55 dark:hover:bg-slate-700 text-slate-755 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg text-[10.5px] font-bold tracking-tight transition flex items-center gap-1 cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              LÀM MỚI DANH SÁCH DRIVE
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleOpenGooglePicker}
+                disabled={pickerLoading || actionLoading !== null}
+                className="p-1 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-500 rounded-lg text-[10.5px] font-black tracking-tight transition flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+              >
+                {pickerLoading ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <FolderOpen className="w-3.5 h-3.5 text-indigo-200" />
+                )}
+                MỞ GOOGLE PICKER CLOUD
+              </button>
+
+              <button
+                type="button"
+                onClick={handleManualSyncList}
+                disabled={loading}
+                className="p-1 px-2.5 bg-white dark:bg-slate-800 hover:bg-slate-55 dark:hover:bg-slate-700 text-slate-755 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg text-[10.5px] font-bold tracking-tight transition flex items-center gap-1 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+                LÀM MỚI DANH SÁCH DRIVE
+              </button>
+            </div>
           )}
         </div>
 
